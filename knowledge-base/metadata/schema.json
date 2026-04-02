@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A1PlusKnowledgeDocument",
+  "type": "object",
+  "required": ["title", "kind", "priority", "path", "topics"],
+  "properties": {
+    "title": { "type": "string" },
+    "kind": { "type": "string", "enum": ["markdown", "json", "pdf"] },
+    "priority": { "type": "string", "enum": ["P0", "P1", "P2"] },
+    "path": { "type": "string" },
+    "topics": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source_url": { "type": ["string", "null"] }
+  }
+}
+

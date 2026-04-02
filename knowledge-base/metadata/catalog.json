@@ -1,0 +1,45 @@
+{
+  "documents": [
+    {
+      "title": "商标分类指南（45类）",
+      "kind": "markdown",
+      "priority": "P0",
+      "path": "sources/p0/商标分类指南（45类）.md",
+      "topics": ["trademark"],
+      "source_url": "https://sbj.cnipa.gov.cn/"
+    },
+    {
+      "title": "商标申请书填写规范",
+      "kind": "markdown",
+      "priority": "P0",
+      "path": "sources/p0/商标申请书填写规范.md",
+      "topics": ["trademark"],
+      "source_url": "https://sbj.cnipa.gov.cn/"
+    },
+    {
+      "title": "商标法与实施条例",
+      "kind": "markdown",
+      "priority": "P0",
+      "path": "sources/p0/商标法与实施条例.md",
+      "topics": ["trademark"],
+      "source_url": "https://www.cnipa.gov.cn/"
+    },
+    {
+      "title": "专利申请模板",
+      "kind": "markdown",
+      "priority": "P1",
+      "path": "sources/p1/专利申请模板.md",
+      "topics": ["patent"],
+      "source_url": "https://www.cnipa.gov.cn/"
+    },
+    {
+      "title": "软著登记指南",
+      "kind": "markdown",
+      "priority": "P1",
+      "path": "sources/p1/软著登记指南.md",
+      "topics": ["copyright"],
+      "source_url": "https://www.ccopyright.com.cn/"
+    }
+  ]
+}
+
