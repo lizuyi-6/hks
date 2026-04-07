@@ -9,57 +9,76 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   api:
-    image: python:3.12-slim
-    working_dir: /workspace
-    volumes:
-      - ./:/workspace
+    build:
+      context: .
+      dockerfile: Dockerfile.api
     env_file:
-      - .env.example
-    command: >
-      sh -c "pip install -r apps/api/requirements.txt &&
-      uvicorn apps.api.main:app --host 0.0.0.0 --port 8000"
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/a1plus
+      REDIS_URL: redis://redis:6379/0
+      NEXT_PUBLIC_API_BASE_URL: http://api:8000
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/system/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   worker:
-    image: python:3.12-slim
-    working_dir: /workspace
-    volumes:
-      - ./:/workspace
+    build:
+      context: .
+      dockerfile: Dockerfile.api
     env_file:
-      - .env.example
-    command: >
-      sh -c "pip install -r apps/api/requirements.txt &&
-      python -m apps.worker.main"
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/a1plus
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "apps.worker.main"]
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   web:
-    image: node:24
-    working_dir: /workspace
-    volumes:
-      - ./:/workspace
+    build:
+      context: .
+      dockerfile: Dockerfile.web
     env_file:
-      - .env.example
-    command: >
-      sh -c "npm install &&
-      npm run dev:web -- --hostname 0.0.0.0 --port 3000"
+      - .env
+    environment:
+      API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://api:8000
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
-

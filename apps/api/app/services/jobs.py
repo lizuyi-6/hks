@@ -9,12 +9,24 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from apps.api.app.adapters.registry import provider_registry
-from apps.api.app.db.models import DocumentRecord, IpAsset, JobRecord, ReminderTask
+from apps.api.app.db.models import DocumentRecord, IpAsset, JobRecord, ModuleResult, ReminderTask, WorkflowStep
 from apps.api.app.schemas.diagnosis import DiagnosisRequest
 from apps.api.app.schemas.trademark import (
     ApplicationDraftRequest,
     ApplicationDraftResult,
 )
+
+
+def _save_module_result(db: Session, job: JobRecord, module_type: str, result_data: dict) -> None:
+    from apps.api.app.db.models import ModuleResult
+    mr = ModuleResult(
+        user_id=job.payload.get("_user_id"),
+        module_type=module_type,
+        job_id=job.id,
+        result_data=result_data,
+    )
+    db.add(mr)
+    db.flush()
 
 
 def utcnow() -> datetime:
@@ -77,9 +89,10 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
     if job.status in {"completed", "dead_letter"}:
         return job
 
-    job.status = "processing"
-    job.attempts += 1
-    db.commit()
+    if job.status != "processing":
+        job.status = "processing"
+        job.attempts += 1
+        db.commit()
 
     try:
         if job.job_type == "diagnosis.report":
@@ -163,6 +176,55 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
             reminder = db.query(ReminderTask).filter(ReminderTask.job_id == job.id).first()
             if reminder:
                 reminder.status = "sent"
+
+        elif job.job_type == "monitoring.scan":
+            provider = provider_registry.get("monitoring")
+            result = provider.scan(job.payload.get("query", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "monitoring", result_dict)
+
+        elif job.job_type == "competitor.track":
+            provider = provider_registry.get("competitor")
+            result = provider.track(job.payload.get("company_name", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "competitor", result_dict)
+
+        elif job.job_type == "competitor.compare":
+            provider = provider_registry.get("competitor")
+            result = provider.compare(job.payload.get("companies", []), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "competitor", result_dict)
+
+        elif job.job_type == "contract.review":
+            provider = provider_registry.get("contractReview")
+            result = provider.review(job.payload.get("contract_text", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "contract", result_dict)
+
+        elif job.job_type == "patent.assess":
+            provider = provider_registry.get("patentAssist")
+            result = provider.assess(job.payload.get("description", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "patent", result_dict)
+
+        elif job.job_type == "policy.digest":
+            provider = provider_registry.get("policyDigest")
+            result = provider.digest(job.payload.get("industry", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "policy", result_dict)
+
+        elif job.job_type == "due-diligence.investigate":
+            provider = provider_registry.get("dueDiligence")
+            result = provider.investigate(job.payload.get("company_name", ""), trace_id=job.id)
+            result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
+            job.result = result_dict
+            _save_module_result(db, job, "due-diligence", result_dict)
 
         else:
             raise ValueError(f"Unknown job type: {job.job_type}")

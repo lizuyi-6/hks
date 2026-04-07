@@ -1,0 +1,19 @@
+FROM node:20-slim
+
+WORKDIR /workspace
+
+COPY package.json package-lock.json* ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+
+RUN npm install
+
+COPY . .
+
+RUN npm run build:web
+
+EXPOSE 3000
+
+CMD ["node", "apps/web/.next/standalone/server.js"]

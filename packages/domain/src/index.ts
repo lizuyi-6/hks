@@ -134,6 +134,53 @@ export type ModuleDefinition = {
   status: "core" | "skeleton";
 };
 
+export type WorkflowInstance = {
+  id: string;
+  userId: string;
+  workflowType: string;
+  status: "pending" | "running" | "completed" | "failed";
+  context: Record<string, unknown>;
+  currentStepIndex: number;
+  steps: WorkflowStep[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkflowStep = {
+  id: string;
+  workflowId: string;
+  stepType: string;
+  stepIndex: number;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  jobId?: string | null;
+  inputData: Record<string, unknown>;
+  outputData: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModuleResultItem = {
+  id: string;
+  userId: string;
+  workflowId?: string | null;
+  moduleType: string;
+  jobId?: string | null;
+  resultData: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type Suggestion = {
+  id: string;
+  title: string;
+  description: string;
+  action: {
+    label: string;
+    href: string;
+    prefilledData?: Record<string, unknown>;
+  };
+  priority: "high" | "medium" | "low";
+};
+
 export const coreWorkflow = [
   "注册 / 登录",
   "IP 诊断",
@@ -183,44 +230,44 @@ export const modules: ModuleDefinition[] = [
   {
     key: "monitoring",
     title: "侵权监控雷达",
-    description: "预留公开搜索、授权 API 与授权抓取通道。",
+    description: "基于公开搜索的商标侵权监控与告警。",
     href: "/monitoring",
-    status: "skeleton"
+    status: "core"
   },
   {
     key: "competitors",
     title: "竞争对手追踪",
-    description: "跟踪竞品商标动态和类别变化。",
+    description: "跟踪竞品 IP 动态，评估竞争态势。",
     href: "/competitors",
-    status: "skeleton"
+    status: "core"
   },
   {
     key: "contracts",
     title: "合同 IP 条款审查",
-    description: "抽取归属、保密、责任等条款并给出修改建议。",
+    description: "AI 辅助审查合同中的知识产权相关条款。",
     href: "/contracts",
-    status: "skeleton"
+    status: "core"
   },
   {
     key: "patents",
     title: "专利 / 软著辅助",
-    description: "为专利技术交底书和软著登记预留流程骨架。",
+    description: "评估技术方案，推荐专利或软著保护策略。",
     href: "/patents",
-    status: "skeleton"
+    status: "core"
   },
   {
     key: "policies",
-    title: "行业政策日报",
-    description: "沉淀知识产权政策与通知摘要。",
+    title: "行业政策摘要",
+    description: "AI 整理行业知识产权政策与合规提醒。",
     href: "/policies",
-    status: "skeleton"
+    status: "core"
   },
   {
     key: "due-diligence",
     title: "融资 IP 尽调",
-    description: "汇总资产、风险与缺口，为融资尽调预留出入口。",
+    description: "汇总目标公司 IP 资产、风险与估值因素。",
     href: "/due-diligence",
-    status: "skeleton"
+    status: "core"
   }
 ];
 

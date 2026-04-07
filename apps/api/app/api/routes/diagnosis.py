@@ -1,14 +1,46 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from apps.api.app.adapters.registry import provider_registry
 from apps.api.app.core.database import get_db
+from apps.api.app.core.error_handler import BusinessError, SystemError
 from apps.api.app.schemas.common import JobResponse
 from apps.api.app.schemas.diagnosis import DiagnosisRequest
 from apps.api.app.services.dependencies import get_current_user
-from apps.api.app.services.jobs import enqueue_job
+from apps.api.app.services.jobs import enqueue_job, process_job
 
 
 router = APIRouter(prefix="/diagnosis", tags=["diagnosis"])
+
+
+@router.post("", response_model=JobResponse)
+def run_diagnosis(
+    payload: DiagnosisRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    try:
+        job = enqueue_job(db, "diagnosis.report", payload.model_dump(mode="json"))
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "IP诊断失败",
+                context="/diagnosis",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return JobResponse(
+            id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            idempotency_key=job.idempotency_key,
+            error_message=job.error_message,
+            result=job.result,
+        )
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/diagnosis") from e
 
 
 @router.post("/jobs", response_model=JobResponse)
@@ -17,13 +49,15 @@ def create_diagnosis_job(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    job = enqueue_job(db, "diagnosis.report", payload.model_dump(mode="json"))
-    return JobResponse(
-        id=job.id,
-        job_type=job.job_type,
-        status=job.status,
-        idempotency_key=job.idempotency_key,
-        error_message=job.error_message,
-        result=job.result,
-    )
-
+    try:
+        job = enqueue_job(db, "diagnosis.report", payload.model_dump(mode="json"))
+        return JobResponse(
+            id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            idempotency_key=job.idempotency_key,
+            error_message=job.error_message,
+            result=job.result,
+        )
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/diagnosis/jobs") from e

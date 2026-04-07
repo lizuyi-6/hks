@@ -6,14 +6,18 @@ import type {
   ApplicationDraft,
   DataMode,
   IpAsset,
+  ModuleResultItem,
   ReminderTask,
+  Suggestion,
   TrademarkCheckRequest,
-  TrademarkCheckResult
+  TrademarkCheckResult,
+  WorkflowInstance
 } from "@a1plus/domain";
 import { coreWorkflow, modules, riskLevelMeta } from "@a1plus/domain";
 import { legalBoundaryNotice } from "@a1plus/config";
-import { Metric, SectionCard, SourceTag, StatusBadge } from "@a1plus/ui";
+import { Metric, NextStepCard, PipelineIndicator, SectionCard, SourceTag, StatusBadge } from "@a1plus/ui";
 import { proxyBaseUrl } from "@/lib/env";
+import { parseErrorResponse, ApplicationError, getErrorDisplayInfo } from "@/lib/errors";
 
 type ProviderHealth = {
   providers: Array<{
@@ -35,13 +39,6 @@ type Envelope<T> = {
   normalizedPayload: T;
 };
 
-type JobResult<T> = {
-  id: string;
-  status: "queued" | "processing" | "completed" | "failed" | "dead_letter";
-  errorMessage?: string | null;
-  result?: T;
-};
-
 type DiagnosisPayload = {
   summary: string;
   priorityAssets: string[];
@@ -50,6 +47,69 @@ type DiagnosisPayload = {
   recommendedTrack: "trademark" | "patent" | "copyright";
   recommendedTrademarkCategories: string[];
 };
+
+function ErrorDisplay({ error }: { error: string | ApplicationError }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const isAppError = error instanceof ApplicationError;
+  const info = isAppError ? getErrorDisplayInfo(error.errorType) : { color: "gray", label: "未知错误" };
+  const bgColor = info.color === "red" ? "bg-rose-100 border-rose-300" :
+                  info.color === "yellow" ? "bg-amber-100 border-amber-300" :
+                  info.color === "blue" ? "bg-blue-100 border-blue-300" :
+                  info.color === "purple" ? "bg-purple-100 border-purple-300" :
+                  info.color === "orange" ? "bg-orange-100 border-orange-300" :
+                  "bg-slate-100 border-slate-300";
+
+  return (
+    <div className={`rounded-lg border p-3 mb-3 ${bgColor}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded ${
+              info.color === "red" ? "bg-rose-200 text-rose-800" :
+              info.color === "yellow" ? "bg-amber-200 text-amber-800" :
+              info.color === "blue" ? "bg-blue-200 text-blue-800" :
+              info.color === "purple" ? "bg-purple-200 text-purple-800" :
+              info.color === "orange" ? "bg-orange-200 text-orange-800" :
+              "bg-slate-200 text-slate-800"
+            }`}>
+              {info.label}
+            </span>
+            {isAppError && error.errorLocation && (
+              <span className="text-xs text-slate-500">{error.errorLocation}</span>
+            )}
+          </div>
+          <p className="text-sm text-slate-700">
+            {isAppError ? error.message : error}
+          </p>
+          {isAppError && error.requestId && (
+            <p className="text-xs text-slate-400 mt-1">请求ID: {error.requestId}</p>
+          )}
+        </div>
+        {isAppError && (
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="text-xs text-slate-500 hover:text-slate-700 underline"
+          >
+            {showDetails ? "收起" : "详情"}
+          </button>
+        )}
+      </div>
+      {showDetails && isAppError && (
+        <div className="mt-2 pt-2 border-t border-slate-200">
+          <p className="text-xs text-slate-500 mb-1">错误位置: {error.errorLocation}</p>
+          <p className="text-xs text-slate-500 mb-1">错误类型: {error.errorType}</p>
+          <p className="text-xs text-slate-500 mb-1">时间: {error.timestamp}</p>
+          {error.details && Object.keys(error.details).length > 0 && (
+            <p className="text-xs text-slate-500">详情: {JSON.stringify(error.details)}</p>
+          )}
+          {process.env.NODE_ENV === "development" && error.stack && (
+            <pre className="mt-2 text-xs text-slate-400 overflow-auto max-h-32">{error.stack}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const jsonHeaders = {
   "Content-Type": "application/json"
@@ -66,66 +126,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || "请求失败");
+    throw parseErrorResponse(detail, path);
   }
 
   return response.json() as Promise<T>;
-}
-
-async function pollJob<T>(jobId: string, maxAttempts = 15) {
-  let attempts = 0;
-
-  while (attempts < maxAttempts) {
-    const job = await request<JobResult<T>>(`/jobs/${jobId}`);
-
-    if (job.status === "completed" || job.status === "failed" || job.status === "dead_letter") {
-      return job;
-    }
-
-    attempts += 1;
-    await new Promise((resolve) => window.setTimeout(resolve, 1200));
-  }
-
-  throw new Error("任务执行超时");
-}
-
-function persist<T>(key: string, value: T) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(key, JSON.stringify(value));
-}
-
-function restore<T>(key: string): T | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const value = window.localStorage.getItem(key);
-  if (!value) {
-    return null;
-  }
-
-  return JSON.parse(value) as T;
 }
 
 export function DashboardPanel() {
   const [health, setHealth] = useState<ProviderHealth | null>(null);
   const [assets, setAssets] = useState<IpAsset[]>([]);
   const [reminders, setReminders] = useState<ReminderTask[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowInstance[]>([]);
+  const [moduleResults, setModuleResults] = useState<ModuleResultItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       request<ProviderHealth>("/system/health"),
       request<IpAsset[]>("/assets"),
-      request<ReminderTask[]>("/reminders")
+      request<ReminderTask[]>("/reminders"),
+      request<Suggestion[]>("/suggestions"),
+      request<WorkflowInstance[]>("/workflows?status=running"),
+      request<ModuleResultItem[]>("/module-results")
     ])
-      .then(([healthPayload, assetsPayload, remindersPayload]) => {
+      .then(([healthPayload, assetsPayload, remindersPayload, suggestionsPayload, workflowsPayload, moduleResultsPayload]) => {
         setHealth(healthPayload);
         setAssets(assetsPayload);
         setReminders(remindersPayload);
+        setSuggestions(suggestionsPayload);
+        setWorkflows(workflowsPayload);
+        setModuleResults(moduleResultsPayload);
       })
       .catch((err: Error) => setError(err.message));
   }, []);
@@ -148,30 +179,154 @@ export function DashboardPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Provider 健康状态" eyebrow="Infra">
-        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      <SectionCard title="待办建议" eyebrow="Suggestions">
+        {suggestions.length === 0 ? (
+          <p className="text-sm text-slate-500">暂无待办建议</p>
+        ) : (
+          <div className="space-y-3">
+            {suggestions.map((suggestion) => {
+              const priorityTone: Record<string, { bg: string; text: string }> = {
+                high: { bg: "bg-red-100", text: "text-red-700" },
+                medium: { bg: "bg-amber-100", text: "text-amber-700" },
+                low: { bg: "bg-blue-100", text: "text-blue-700" }
+              };
+              const tone = priorityTone[suggestion.priority] ?? priorityTone.low;
+              return (
+                <div key={suggestion.id} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-slate-900">{suggestion.title}</p>
+                      <p className="mt-1 text-sm text-slate-500">{suggestion.description}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${tone.bg} ${tone.text}`}>
+                      {suggestion.priority === "high" ? "高" : suggestion.priority === "medium" ? "中" : "低"}
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <Link
+                      href={suggestion.action.href}
+                      className="inline-flex rounded-full bg-ink px-4 py-1.5 text-sm font-semibold text-white"
+                    >
+                      {suggestion.action.label}
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="活跃工作流" eyebrow="Workflows">
+        {workflows.length === 0 ? (
+          <p className="text-sm text-slate-500">暂无进行中的工作流</p>
+        ) : (
+          <div className="space-y-4">
+            {workflows.map((workflow) => {
+              const stepTypeNames: Record<string, string> = {
+                diagnosis: "IP 诊断",
+                trademark_check: "商标查重",
+                application_generate: "申请书生成",
+                submission_guide: "提交引导",
+                ledger_write: "入台账",
+                reminder_create: "创建提醒",
+                monitoring_scan: "侵权监控",
+                competitor_track: "竞争对手追踪",
+                contract_review: "合同审查",
+                patent_assess: "专利评估",
+                policy_digest: "政策速递",
+                due_diligence: "尽调报告"
+              };
+              return (
+                <div key={workflow.id} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-slate-900">{workflow.workflowType}</p>
+                    <StatusBadge label={workflow.status} tone="info" />
+                  </div>
+                  <div className="mt-4">
+                    <PipelineIndicator
+                      steps={workflow.steps.map((step) => ({ name: stepTypeNames[step.stepType] ?? step.stepType }))}
+                      currentIndex={workflow.currentStepIndex}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Provider 健康状态" eyebrow="基础设施">
+        {error ? <ErrorDisplay error={error} /> : null}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {health?.providers.map((providerItem) => (
-            <div key={`${providerItem.port}-${providerItem.provider}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-medium text-slate-950">{providerItem.port}</p>
-                <StatusBadge
-                  label={providerItem.available ? "Available" : "Unavailable"}
-                  tone={providerItem.available ? "success" : "danger"}
-                />
+          {health?.providers.map((providerItem) => {
+            const portNames: Record<string, string> = {
+              trademarkSearch: "商标查重",
+              enterpriseLookup: "企业查询",
+              publicWebSearch: "公开搜索",
+              knowledgeBase: "知识库",
+              llm: "大语言模型",
+              documentRender: "文档生成",
+              notification: "邮件通知",
+              monitoring: "侵权监控",
+              submissionGuide: "申报指南",
+              competitor: "竞争对手",
+              contractReview: "合同审查",
+              patentAssist: "专利辅助",
+              policyDigest: "政策速递",
+              dueDiligence: "尽调报告",
+            };
+            const providerNames: Record<string, string> = {
+              "cnipa-snapshot": "CNIPA 商标快照",
+              "tianyancha": "天眼查",
+              "bing": "必应搜索",
+              "official-kb-snapshot": "官方知识库快照",
+              "tencent": "腾讯云 LLM",
+              "docx-reportlab": "DOCX/PDF 生成",
+              "smtp": "SMTP 邮件",
+              "bing-search-monitoring": "必应搜索监控",
+              "cnipa-guide": "CNIPA 申报指南",
+              "tianyancha-competitor": "天眼查竞争对手",
+              "llm-contract-review": "LLM 合同审查",
+              "llm-patent-assist": "LLM 专利辅助",
+              "llm-policy-digest": "LLM 政策速递",
+              "llm-due-diligence": "LLM 尽调报告",
+              "rules-engine": "规则引擎",
+              "basic-competitor": "基础竞争对手",
+              "placeholder": "占位数据",
+              "local-scan": "本地扫描",
+            };
+            const reasonNames: Record<string, string> = {
+              "fallback: no TIANAYANCHA_API_KEY, returning basic info": "未配置天眼查 Key，仅返回基础信息",
+              "fallback: no BING_SEARCH_API_KEY, returning placeholder results": "未配置必应 Key，返回占位数据",
+              "fallback: no BING_SEARCH_API_KEY, using local scan": "未配置必应 Key，使用本地扫描",
+              "SMTP not configured, emails will be logged only": "未配置 SMTP，邮件仅记录日志",
+            };
+            const portName = portNames[providerItem.port] ?? providerItem.port;
+            const providerName = providerNames[providerItem.provider] ?? providerItem.provider;
+            const reasonText = providerItem.reason ? (reasonNames[providerItem.reason] ?? providerItem.reason) : null;
+            return (
+              <div key={`${providerItem.port}-${providerItem.provider}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium text-slate-950">{portName}</p>
+                  <StatusBadge
+                    label={providerItem.available ? "可用" : "不可用"}
+                    tone={providerItem.available ? "success" : "danger"}
+                  />
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <SourceTag mode={providerItem.mode} provider={providerName} />
+                </div>
+                {reasonText ? (
+                  <p className="mt-3 text-sm text-slate-500">{reasonText}</p>
+                ) : null}
               </div>
-              <div className="mt-4 flex items-center gap-2">
-                <SourceTag mode={providerItem.mode} provider={providerItem.provider} />
-              </div>
-              {providerItem.reason ? (
-                <p className="mt-3 text-sm text-slate-500">{providerItem.reason}</p>
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </SectionCard>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
         <SectionCard title="最近资产" eyebrow="Ledger">
           <div className="space-y-3">
             {assets.length === 0 ? (
@@ -199,7 +354,7 @@ export function DashboardPanel() {
                 <div key={task.id} className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
                   <div>
                     <p className="font-medium text-slate-900">{task.channel.toUpperCase()}</p>
-                    <p className="text-sm text-slate-500">到期时间 {new Date(task.dueAt).toLocaleString()}</p>
+                    <p className="text-sm text-slate-500">到期时间 {new Date(task.dueAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</p>
                   </div>
                   <StatusBadge
                     label={task.status}
@@ -207,6 +362,37 @@ export function DashboardPanel() {
                   />
                 </div>
               ))
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="最近模块结果" eyebrow="Module Results">
+          <div className="space-y-3">
+            {moduleResults.length === 0 ? (
+              <p className="text-sm text-slate-500">暂无模块执行记录</p>
+            ) : (
+              moduleResults.slice(0, 5).map((result) => {
+                const moduleTypeNames: Record<string, string> = {
+                  diagnosis: "IP 诊断",
+                  trademark_check: "商标查重",
+                  application_generate: "申请书生成",
+                  monitoring: "侵权监控",
+                  competitor: "竞争对手追踪",
+                  contract_review: "合同审查",
+                  patent_assess: "专利评估",
+                  policy_digest: "政策速递",
+                  due_diligence: "尽调报告"
+                };
+                const preview = JSON.stringify(result.resultData ?? {});
+                const truncated = preview.length > 80 ? `${preview.slice(0, 80)}…` : preview;
+                return (
+                  <div key={result.id} className="rounded-2xl border border-slate-200 px-4 py-3">
+                    <p className="font-medium text-slate-900">{moduleTypeNames[result.moduleType] ?? result.moduleType}</p>
+                    <p className="text-sm text-slate-500">{new Date(result.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</p>
+                    <p className="mt-1 truncate text-sm text-slate-400">{truncated}</p>
+                  </div>
+                );
+              })
             )}
           </div>
         </SectionCard>
@@ -218,9 +404,18 @@ export function DashboardPanel() {
 export function DiagnosisWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<Envelope<DiagnosisPayload> | null>(
-    restore("diagnosis-report")
-  );
+  const [report, setReport] = useState<Envelope<DiagnosisPayload> | null>(null);
+
+  useEffect(() => {
+    request<ModuleResultItem[]>("/module-results?module_type=diagnosis")
+      .then((results) => {
+        if (results.length > 0) {
+          const latest = results[results.length - 1];
+          setReport(latest.resultData as unknown as Envelope<DiagnosisPayload>);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -234,19 +429,12 @@ export function DiagnosisWorkspace() {
     };
 
     try {
-      const job = await request<{ id: string }>("/diagnosis/jobs", {
+      const result = await request<Envelope<DiagnosisPayload>>("/diagnosis", {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      const finished = await pollJob<Envelope<DiagnosisPayload>>(job.id);
 
-      if (!finished.result) {
-        throw new Error("诊断结果为空");
-      }
-
-      setReport(finished.result);
-      persist("diagnosis-report", finished.result);
-      persist("diagnosis-form", payload);
+      setReport(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "诊断失败");
     } finally {
@@ -257,7 +445,7 @@ export function DiagnosisWorkspace() {
   return (
     <div className="space-y-6">
       <SectionCard title="IP 快速诊断" eyebrow="Core Flow">
-        <form action={handleSubmit} className="grid gap-4">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="businessName"
             placeholder="公司名 / 项目名"
@@ -285,15 +473,30 @@ export function DiagnosisWorkspace() {
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-fit rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "生成诊断中..." : "生成 IP 保护建议"}
+            {loading ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                AI 诊断中...
+              </>
+            ) : (
+              "生成 IP 保护建议"
+            )}
           </button>
-          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {loading ? (
+            <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
+              <p className="text-sm text-rust">
+                ⏳ AI 正在分析业务信息，通常需要 10-20 秒...
+              </p>
+            </div>
+          ) : null}
+          {error ? <ErrorDisplay error={error} /> : null}
         </form>
       </SectionCard>
 
       {report ? (
+        <>
         <SectionCard
           title="诊断结果"
           eyebrow="Result"
@@ -304,7 +507,7 @@ export function DiagnosisWorkspace() {
             <div className="rounded-2xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-700">优先保护资产</p>
               <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                {report.normalizedPayload.priorityAssets.map((item) => (
+                {(report.normalizedPayload.priorityAssets ?? []).map((item) => (
                   <li key={item}>• {item}</li>
                 ))}
               </ul>
@@ -312,7 +515,7 @@ export function DiagnosisWorkspace() {
             <div className="rounded-2xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-700">下一步行动</p>
               <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                {report.normalizedPayload.nextActions.map((item) => (
+                {(report.normalizedPayload.nextActions ?? []).map((item) => (
                   <li key={item}>• {item}</li>
                 ))}
               </ul>
@@ -331,6 +534,14 @@ export function DiagnosisWorkspace() {
             <StatusBadge label={`推荐方向：${report.normalizedPayload.recommendedTrack}`} tone="info" />
           </div>
         </SectionCard>
+        {report.normalizedPayload.recommendedTrack === "trademark" ? (
+          <NextStepCard
+            title="建议下一步：商标查重"
+            description="根据诊断结果，建议您进行商标查重以确认名称可用性。"
+            action={{ label: "前往商标查重", href: "/trademark/check" }}
+          />
+        ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -343,9 +554,29 @@ export function TrademarkCheckWorkspace({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Envelope<TrademarkCheckResult> | null>(
-    restore("trademark-check-result")
-  );
+  const [result, setResult] = useState<Envelope<TrademarkCheckResult> | null>(null);
+  const [prefillDescription, setPrefillDescription] = useState("");
+
+  useEffect(() => {
+    request<ModuleResultItem[]>("/module-results?module_type=trademark-check")
+      .then((results) => {
+        if (results.length > 0) {
+          const latest = results[results.length - 1];
+          setResult(latest.resultData as unknown as Envelope<TrademarkCheckResult>);
+        }
+      })
+      .catch(() => {});
+
+    request<ModuleResultItem[]>("/module-results?module_type=diagnosis")
+      .then((results) => {
+        if (results.length > 0) {
+          const latest = results[results.length - 1] as unknown as { resultData: Envelope<DiagnosisPayload> };
+          const desc = (latest.resultData as unknown as Envelope<DiagnosisPayload>)?.normalizedPayload?.summary;
+          if (desc) setPrefillDescription(desc);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -363,13 +594,12 @@ export function TrademarkCheckWorkspace({
     };
 
     try {
-      const response = await request<Envelope<TrademarkCheckResult>>("/trademarks/check", {
+      const result = await request<Envelope<TrademarkCheckResult>>("/trademarks/check", {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      setResult(response);
-      persist("trademark-check-request", payload);
-      persist("trademark-check-result", response);
+
+      setResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "查重失败");
     } finally {
@@ -378,14 +608,14 @@ export function TrademarkCheckWorkspace({
   }
 
   const riskMeta = useMemo(
-    () => (result ? riskLevelMeta[result.normalizedPayload.riskLevel] : null),
+    () => (result ? riskLevelMeta[result.normalizedPayload.riskLevel ?? result.normalizedPayload.risk_level ?? "yellow"] : null),
     [result]
   );
 
   return (
     <div className="space-y-6">
       <SectionCard title="商标查重分析" eyebrow="Core Flow">
-        <form action={handleSubmit} className="grid gap-4">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="trademarkName"
             placeholder="商标名称"
@@ -397,7 +627,7 @@ export function TrademarkCheckWorkspace({
             placeholder="业务描述，用于辅助判断类别和使用场景"
             rows={5}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
-            defaultValue={restore<{ business_description?: string }>("diagnosis-form")?.business_description ?? ""}
+            defaultValue={prefillDescription}
             required
           />
           <div className="grid gap-4 md:grid-cols-3">
@@ -425,15 +655,30 @@ export function TrademarkCheckWorkspace({
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-fit rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "分析中..." : "执行商标查重"}
+            {loading ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                查询中...
+              </>
+            ) : (
+              "执行商标查重"
+            )}
           </button>
-          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {loading ? (
+            <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
+              <p className="text-sm text-rust">
+                ⏳ 正在检索商标数据库，请稍候...
+              </p>
+            </div>
+          ) : null}
+          {error ? <ErrorDisplay error={error} /> : null}
         </form>
       </SectionCard>
 
       {result && riskMeta ? (
+        <>
         <SectionCard
           title="查重结果"
           eyebrow="Result"
@@ -450,13 +695,13 @@ export function TrademarkCheckWorkspace({
             <div className="rounded-2xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-700">近似项 / 冲突项</p>
               <div className="mt-3 space-y-3">
-                {result.normalizedPayload.findings.map((finding) => (
+                {(result.normalizedPayload.findings ?? []).map((finding) => (
                   <div key={`${finding.name}-${finding.category}`} className="rounded-2xl bg-slate-50 p-3">
                     <p className="font-medium text-slate-900">
                       {finding.name} · 第{finding.category}类
                     </p>
                     <p className="text-sm text-slate-500">
-                      相似度 {finding.similarityScore}% · {finding.status}
+                      相似度 {finding.similarityScore ?? finding.similarity_score}% · {finding.status}
                     </p>
                     <p className="mt-2 text-sm text-slate-600">{finding.note}</p>
                   </div>
@@ -468,11 +713,13 @@ export function TrademarkCheckWorkspace({
               <p className="mt-3 text-sm leading-7 text-slate-600">
                 {result.normalizedPayload.recommendation}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {result.normalizedPayload.alternatives.map((item) => (
-                  <StatusBadge key={item} label={item} tone="info" />
-                ))}
-              </div>
+              {result.normalizedPayload.alternatives?.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {result.normalizedPayload.alternatives.map((item) => (
+                    <StatusBadge key={item} label={item} tone="info" />
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-900">
@@ -485,22 +732,73 @@ export function TrademarkCheckWorkspace({
             进入申请书生成
           </Link>
         </SectionCard>
+        {(result.normalizedPayload.riskLevel === "green" || result.normalizedPayload.risk_level === "green") ? (
+          <NextStepCard
+            title="商标可用，建议生成申请书"
+            description="查重结果显示商标可用，可以继续进行申请书生成。"
+            action={{ label: "前往申请书生成", href: "/trademark/application" }}
+          />
+        ) : (result.normalizedPayload.riskLevel === "yellow" || result.normalizedPayload.risk_level === "yellow") ? (
+          <NextStepCard
+            title="存在近似商标，请谨慎"
+            description="查重发现近似商标，建议仔细评估风险后再决定是否申请。"
+            action={{ label: "查看资产台账", href: "/assets" }}
+          />
+        ) : (result.normalizedPayload.riskLevel === "red" || result.normalizedPayload.risk_level === "red") ? (
+          <NextStepCard
+            title="存在冲突，建议调整名称"
+            description="查重发现明显冲突，建议调整商标名称后重新查重。"
+            action={{ label: "重新查重", href: "/trademark/check" }}
+          />
+        ) : null}
+        </>
       ) : null}
     </div>
   );
 }
 
 export function ApplicationWorkspace() {
-  const storedRequest = restore<TrademarkCheckRequest>("trademark-check-request");
-  const storedResult = restore<Envelope<TrademarkCheckResult>>("trademark-check-result");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<ApplicationDraft | null>(restore("application-draft"));
+  const [draft, setDraft] = useState<ApplicationDraft | null>(null);
+  const [prefillData, setPrefillData] = useState<{
+    trademarkName?: string;
+    businessDescription?: string;
+    applicantName?: string;
+    applicantType?: string;
+    categories?: string[];
+    riskLevel?: string;
+  }>({});
+
+  useEffect(() => {
+    request<ModuleResultItem[]>("/module-results?module_type=application_generate")
+      .then((results) => {
+        if (results.length > 0) {
+          const latest = results[results.length - 1];
+          setDraft(latest.resultData as unknown as ApplicationDraft);
+        }
+      })
+      .catch(() => {});
+
+    request<ModuleResultItem[]>("/module-results?module_type=trademark-check")
+      .then((results) => {
+        if (results.length > 0) {
+          const latest = results[results.length - 1];
+          const checkResult = latest.resultData as Record<string, unknown>;
+          const envelope = checkResult as unknown as Envelope<TrademarkCheckResult>;
+          setPrefillData((prev) => ({
+            ...prev,
+            riskLevel: envelope.normalizedPayload?.riskLevel ?? envelope.normalizedPayload?.risk_level ?? "yellow",
+            categories: envelope.normalizedPayload?.suggestedCategories ?? envelope.normalizedPayload?.suggested_categories
+          }));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
-
     const payload = {
       trademark_name: String(formData.get("trademarkName") ?? ""),
       applicant_name: String(formData.get("applicantName") ?? ""),
@@ -510,22 +808,20 @@ export function ApplicationWorkspace() {
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean),
-      risk_level: storedResult?.normalizedPayload.riskLevel ?? "yellow"
+      risk_level: prefillData.riskLevel ?? "yellow"
     };
 
     try {
-      const job = await request<{ id: string }>("/trademarks/application/jobs", {
+      const response = await request<{ id: string; result?: ApplicationDraft }>("/trademarks/application/jobs", {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      const finished = await pollJob<ApplicationDraft>(job.id);
 
-      if (!finished.result) {
+      if (!response.result) {
         throw new Error("申请书结果为空");
       }
 
-      setDraft(finished.result);
-      persist("application-draft", finished.result);
+      setDraft(response.result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "申请书生成失败");
     } finally {
@@ -536,18 +832,18 @@ export function ApplicationWorkspace() {
   return (
     <div className="space-y-6">
       <SectionCard title="商标申请书生成" eyebrow="Core Flow">
-        <form action={handleSubmit} className="grid gap-4">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="trademarkName"
             placeholder="商标名称"
-            defaultValue={storedRequest?.trademarkName ?? ""}
+            defaultValue={prefillData.trademarkName ?? ""}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
             required
           />
           <textarea
             name="businessDescription"
             placeholder="业务描述"
-            defaultValue={storedRequest?.businessDescription ?? ""}
+            defaultValue={prefillData.businessDescription ?? ""}
             rows={5}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
             required
@@ -556,13 +852,13 @@ export function ApplicationWorkspace() {
             <input
               name="applicantName"
               placeholder="申请人名称"
-              defaultValue={storedRequest?.applicantName ?? ""}
+              defaultValue={prefillData.applicantName ?? ""}
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
               required
             />
             <select
               name="applicantType"
-              defaultValue={storedRequest?.applicantType ?? "company"}
+              defaultValue={prefillData.applicantType ?? "company"}
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
             >
               <option value="company">企业</option>
@@ -571,7 +867,7 @@ export function ApplicationWorkspace() {
             <input
               name="categories"
               placeholder="类别，用逗号分隔"
-              defaultValue={storedRequest?.categories.join(",") ?? ""}
+              defaultValue={prefillData.categories?.join(",") ?? ""}
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
               required
             />
@@ -579,15 +875,30 @@ export function ApplicationWorkspace() {
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-fit rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "生成中..." : "生成 Word / PDF"}
+            {loading ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                正在生成申请书，请稍候...
+              </>
+            ) : (
+              "生成 Word / PDF"
+            )}
           </button>
-          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {loading ? (
+            <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
+              <p className="text-sm text-rust">
+                ⏳ AI 正在分析商标信息并生成文档，通常需要 10-20 秒...
+              </p>
+            </div>
+          ) : null}
+          {error ? <ErrorDisplay error={error} /> : null}
         </form>
       </SectionCard>
 
       {draft ? (
+        <>
         <SectionCard title="申请书结果" eyebrow="Documents">
           <div className="flex items-center gap-3">
             <SourceTag mode={draft.sourceMode} provider={draft.provider} />
@@ -597,11 +908,11 @@ export function ApplicationWorkspace() {
             <div className="rounded-2xl border border-slate-200 p-4">
               <p className="font-medium text-slate-900">{draft.trademarkName}</p>
               <p className="mt-2 text-sm text-slate-500">
-                申请人 {draft.applicantName} · 类别 {draft.categories.join(", ")}
+                申请人 {draft.applicantName} · 类别 {(draft.categories ?? []).join(", ")}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <StatusBadge label={riskLevelMeta[draft.riskLevel].label} tone={draft.riskLevel === "green" ? "success" : draft.riskLevel === "yellow" ? "warning" : "danger"} />
-                {draft.documentLabels.map((label) => (
+                <StatusBadge label={riskLevelMeta[draft.riskLevel ?? draft.risk_level ?? "yellow"].label} tone={(draft.riskLevel === "green" || draft.risk_level === "green") ? "success" : (draft.riskLevel === "yellow" || draft.risk_level === "yellow") ? "warning" : "danger"} />
+                {(draft.documentLabels ?? []).map((label) => (
                   <StatusBadge key={label} label={label} tone="info" />
                 ))}
               </div>
@@ -634,6 +945,12 @@ export function ApplicationWorkspace() {
             查看提交引导
           </Link>
         </SectionCard>
+        <NextStepCard
+          title="查看提交引导"
+          description="申请书已生成，建议查看提交流程引导完成最终提交。"
+          action={{ label: "前往提交引导", href: "/trademark/submit" }}
+        />
+        </>
       ) : null}
     </div>
   );
@@ -644,23 +961,41 @@ export function SubmitGuideWorkspace({ draftId }: { draftId?: string }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const activeDraftId = draftId ?? restore<ApplicationDraft>("application-draft")?.draftId;
+    async function loadGuide() {
+      let activeDraftId = draftId;
 
-    if (!activeDraftId) {
-      setError("未找到申请书，请先完成申请书生成。");
-      return;
+      if (!activeDraftId) {
+        try {
+          const results = await request<ModuleResultItem[]>("/module-results?module_type=application_generate");
+          if (results.length > 0) {
+            const latest = results[results.length - 1];
+            const appDraft = latest.resultData as unknown as ApplicationDraft;
+            activeDraftId = appDraft?.draftId;
+          }
+        } catch {
+          setError("未找到申请书，请先完成申请书生成。");
+          return;
+        }
+      }
+
+      if (!activeDraftId) {
+        setError("未找到申请书，请先完成申请书生成。");
+        return;
+      }
+
+      request<Envelope<{ draft: ApplicationDraft; guide: { title: string; steps: string[]; officialUrl: string; warning: string } }>>(
+        `/trademarks/drafts/${activeDraftId}`
+      )
+        .then(setGuide)
+        .catch((err: Error) => setError(err.message));
     }
 
-    request<Envelope<{ draft: ApplicationDraft; guide: { title: string; steps: string[]; officialUrl: string; warning: string } }>>(
-      `/trademarks/drafts/${activeDraftId}`
-    )
-      .then(setGuide)
-      .catch((err: Error) => setError(err.message));
+    void loadGuide();
   }, [draftId]);
 
   return (
     <SectionCard title="提交流程引导" eyebrow="Compliance">
-      {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      {error ? <ErrorDisplay error={error} /> : null}
       {guide ? (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
@@ -742,7 +1077,7 @@ export function AssetLedgerPanel() {
   return (
     <div className="space-y-6">
       <SectionCard title="新增资产" eyebrow="Manual Ledger">
-        <form action={handleCreate} className="grid gap-4 md:grid-cols-2">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleCreate(new FormData(e.currentTarget)); }} className="grid gap-4 md:grid-cols-2">
           <input
             name="name"
             placeholder="资产名称"
@@ -776,7 +1111,7 @@ export function AssetLedgerPanel() {
             添加资产
           </button>
         </form>
-        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+        {error ? <ErrorDisplay error={error} /> : null}
       </SectionCard>
 
       <SectionCard title="资产列表" eyebrow="Auto + Manual">
@@ -840,7 +1175,7 @@ export function ReminderPanel() {
 
   return (
     <SectionCard title="提醒中心" eyebrow="Queue + Retry">
-      {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      {error ? <ErrorDisplay error={error} /> : null}
       <div className="space-y-3">
         {tasks.length === 0 ? (
           <p className="text-sm text-slate-500">暂无提醒任务。</p>
@@ -850,7 +1185,7 @@ export function ReminderPanel() {
               <div>
                 <p className="font-medium text-slate-900">{task.channel.toUpperCase()}</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  到期时间 {new Date(task.dueAt).toLocaleString()} · 资产 {task.assetId}
+                  到期时间 {new Date(task.dueAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} · 资产 {task.assetId}
                 </p>
               </div>
               <div className="flex items-center gap-3">

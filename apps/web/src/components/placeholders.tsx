@@ -25,7 +25,7 @@ export function SkeletonModule({
           <p className="text-sm font-medium text-slate-700">当前状态</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <StatusBadge label="Feature Flag" tone="info" />
-            <StatusBadge label={featureName} tone="neutral" />
+            <StatusBadge label={featureName} tone="info" />
             <StatusBadge label="待接入" tone="warning" />
           </div>
         </div>

@@ -41,7 +41,7 @@ export default function LoginPage() {
         <p className="text-sm leading-7 text-slate-600">
           使用邮箱密码登录，进入诊断、查重、申请书生成、台账和提醒中心。
         </p>
-        <form action={handleSubmit} className="grid gap-4">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="email"
             type="email"

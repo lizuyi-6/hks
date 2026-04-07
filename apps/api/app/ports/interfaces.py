@@ -65,6 +65,15 @@ class LLMPort(BasePortAdapter, ABC):
     ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
+    @abstractmethod
+    def analyze_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        trace_id: str,
+    ) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
 
 class DocumentRenderPort(BasePortAdapter, ABC):
     @abstractmethod
@@ -86,6 +95,44 @@ class NotificationPort(BasePortAdapter, ABC):
 class MonitoringPort(BasePortAdapter, ABC):
     @abstractmethod
     def scan(self, query: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_alerts(self, user_id: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class CompetitorPort(BasePortAdapter, ABC):
+    @abstractmethod
+    def track(self, company_name: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def compare(self, companies: list[str], trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class ContractReviewPort(BasePortAdapter, ABC):
+    @abstractmethod
+    def review(self, contract_text: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class PatentAssistPort(BasePortAdapter, ABC):
+    @abstractmethod
+    def assess(self, description: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class PolicyDigestPort(BasePortAdapter, ABC):
+    @abstractmethod
+    def digest(self, industry: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class DueDiligencePort(BasePortAdapter, ABC):
+    @abstractmethod
+    def investigate(self, company_name: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
 

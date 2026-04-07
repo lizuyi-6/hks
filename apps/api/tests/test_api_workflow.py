@@ -83,14 +83,16 @@ def test_trademark_check_and_application_flow(client, auth_headers):
 
 def test_placeholder_modules_are_exposed(client, auth_headers):
     endpoints = [
-        "/monitoring",
-        "/competitors",
-        "/contracts",
-        "/patents",
-        "/policies",
-        "/due-diligence",
+        "/monitoring/status",
+        "/competitors/status",
+        "/contracts/status",
+        "/patents/status",
+        "/policies/status",
+        "/due-diligence/status",
     ]
     for path in endpoints:
         response = client.get(path, headers=auth_headers)
         assert response.status_code == 200
-        assert response.json()["status"] == "placeholder"
+        data = response.json()
+        assert "module" in data
+        assert "enabled" in data

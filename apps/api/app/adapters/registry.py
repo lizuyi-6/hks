@@ -3,22 +3,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from apps.api.app.adapters.mock.providers import (
+    MockCompetitorAdapter,
+    MockContractReviewAdapter,
     MockDocumentRenderAdapter,
+    MockDueDiligenceAdapter,
     MockEnterpriseLookupAdapter,
     MockKnowledgeBaseAdapter,
     MockLlmAdapter,
     MockMonitoringAdapter,
     MockNotificationAdapter,
+    MockPatentAssistAdapter,
+    MockPolicyDigestAdapter,
     MockPublicWebSearchAdapter,
     MockSubmissionGuideAdapter,
     MockTrademarkSearchAdapter,
 )
+from apps.api.app.adapters.real.competitor import RealCompetitorAdapter
+from apps.api.app.adapters.real.contract_review import RealContractReviewAdapter
 from apps.api.app.adapters.real.document_render import RealDocumentRenderAdapter
+from apps.api.app.adapters.real.due_diligence import RealDueDiligenceAdapter
 from apps.api.app.adapters.real.enterprise_lookup import RealEnterpriseLookupAdapter
 from apps.api.app.adapters.real.knowledge import RealKnowledgeBaseAdapter
-from apps.api.app.adapters.real.llm import RealRuleLlmAdapter
+from apps.api.app.adapters.real.llm import RealLlmAdapter
 from apps.api.app.adapters.real.monitoring import RealMonitoringAdapter
 from apps.api.app.adapters.real.notification import RealNotificationAdapter
+from apps.api.app.adapters.real.patent_assist import RealPatentAssistAdapter
+from apps.api.app.adapters.real.policy_digest import RealPolicyDigestAdapter
 from apps.api.app.adapters.real.public_web_search import RealPublicWebSearchAdapter
 from apps.api.app.adapters.real.submission_guide import RealSubmissionGuideAdapter
 from apps.api.app.adapters.real.trademark_search import RealTrademarkSearchAdapter
@@ -54,7 +64,7 @@ class ProviderRegistry:
                 "real": RealKnowledgeBaseAdapter(),
                 "mock": MockKnowledgeBaseAdapter(),
             },
-            "llm": {"real": RealRuleLlmAdapter(), "mock": MockLlmAdapter()},
+            "llm": {"real": RealLlmAdapter(), "mock": MockLlmAdapter()},
             "documentRender": {
                 "real": RealDocumentRenderAdapter(),
                 "mock": MockDocumentRenderAdapter(),
@@ -67,6 +77,26 @@ class ProviderRegistry:
             "submissionGuide": {
                 "real": RealSubmissionGuideAdapter(),
                 "mock": MockSubmissionGuideAdapter(),
+            },
+            "competitor": {
+                "real": RealCompetitorAdapter(),
+                "mock": MockCompetitorAdapter(),
+            },
+            "contractReview": {
+                "real": RealContractReviewAdapter(),
+                "mock": MockContractReviewAdapter(),
+            },
+            "patentAssist": {
+                "real": RealPatentAssistAdapter(),
+                "mock": MockPatentAssistAdapter(),
+            },
+            "policyDigest": {
+                "real": RealPolicyDigestAdapter(),
+                "mock": MockPolicyDigestAdapter(),
+            },
+            "dueDiligence": {
+                "real": RealDueDiligenceAdapter(),
+                "mock": MockDueDiligenceAdapter(),
             },
         }
 
@@ -81,8 +111,13 @@ class ProviderRegistry:
             "notification": self.settings.provider_notification_mode,
             "monitoring": self.settings.provider_monitoring_mode,
             "submissionGuide": self.settings.provider_submission_guide_mode,
+            "competitor": self.settings.provider_monitoring_mode,
+            "contractReview": self.settings.provider_monitoring_mode,
+            "patentAssist": self.settings.provider_monitoring_mode,
+            "policyDigest": self.settings.provider_monitoring_mode,
+            "dueDiligence": self.settings.provider_monitoring_mode,
         }
-        return mapping[port]
+        return mapping.get(port, "real")
 
     def get(self, port: str, mode: str | None = None):
         active_mode = mode or self.mode_for(port)

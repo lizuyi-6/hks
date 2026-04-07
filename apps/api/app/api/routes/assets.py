@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.database import get_db
-from apps.api.app.db.models import IpAsset
+from apps.api.app.db.models import IpAsset, ReminderTask
 from apps.api.app.schemas.assets import AssetCreateRequest, AssetResponse
 from apps.api.app.services.dependencies import get_current_user
 from apps.api.app.services.jobs import _schedule_asset_reminders
@@ -77,6 +77,7 @@ def delete_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
 
+    db.query(ReminderTask).filter(ReminderTask.asset_id == asset_id).delete()
     db.delete(asset)
     db.commit()
     return {"ok": True}

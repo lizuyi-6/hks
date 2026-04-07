@@ -62,7 +62,7 @@ class ReminderTask(Base):
     __tablename__ = "reminder_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    asset_id: Mapped[str] = mapped_column(String(36), ForeignKey("ip_assets.id"))
+    asset_id: Mapped[str] = mapped_column(String(36), ForeignKey("ip_assets.id", ondelete="CASCADE"))
     job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("job_records.id"), nullable=True)
     channel: Mapped[str] = mapped_column(String(32), default="email")
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -80,4 +80,48 @@ class DocumentRecord(Base):
     docx_path: Mapped[str] = mapped_column(String(255))
     pdf_path: Mapped[str] = mapped_column(String(255))
     document_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkflowInstance(Base):
+    __tablename__ = "workflow_instances"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    workflow_type: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    current_step_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    steps: Mapped[list["WorkflowStep"]] = relationship(back_populates="workflow")
+
+
+class WorkflowStep(Base):
+    __tablename__ = "workflow_steps"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workflow_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflow_instances.id"))
+    step_type: Mapped[str] = mapped_column(String(120))
+    step_index: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("job_records.id"), nullable=True)
+    input_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    workflow: Mapped["WorkflowInstance"] = relationship(back_populates="steps")
+
+
+class ModuleResult(Base):
+    __tablename__ = "module_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("workflow_instances.id"), nullable=True)
+    module_type: Mapped[str] = mapped_column(String(64))
+    job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("job_records.id"), nullable=True)
+    result_data: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

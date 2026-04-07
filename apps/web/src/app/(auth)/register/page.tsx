@@ -42,7 +42,7 @@ export default function RegisterPage() {
         <p className="text-sm leading-7 text-slate-600">
           创建一个演示账户，直接进入全 PRD 骨架工作台。
         </p>
-        <form action={handleSubmit} className="grid gap-4">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="fullName"
             placeholder="姓名"

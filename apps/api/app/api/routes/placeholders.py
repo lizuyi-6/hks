@@ -1,53 +1,220 @@
-from fastapi import APIRouter, Depends
+from __future__ import annotations
 
-from apps.api.app.core.config import get_settings
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from apps.api.app.adapters.registry import provider_registry
+from apps.api.app.core.database import get_db
+from apps.api.app.core.error_handler import BusinessError, SystemError
 from apps.api.app.schemas.common import PlaceholderResponse
 from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.jobs import enqueue_job, process_job
+
+router = APIRouter(tags=["modules"])
 
 
-router = APIRouter(tags=["placeholders"])
-settings = get_settings()
-
-
-def _placeholder(module: str, enabled: bool) -> PlaceholderResponse:
+@router.get("/monitoring/status", response_model=PlaceholderResponse)
+def monitoring_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("monitoring").availability()
     return PlaceholderResponse(
-        module=module,
-        enabled=enabled,
-        message="模块骨架已创建，真实业务能力后续按 feature flag 启用。",
+        module="monitoring",
+        enabled=available,
+        message=reason or "侵权监控模块已启用",
     )
 
 
-@router.get("/monitoring", response_model=PlaceholderResponse)
-def monitoring(_user=Depends(get_current_user)):
-    return _placeholder(
-        "monitoring",
-        settings.feature_monitoring_public_search
-        or settings.feature_monitoring_authorized_api
-        or settings.feature_monitoring_authorized_scrape,
+@router.post("/monitoring/scan")
+def monitoring_scan(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "monitoring.scan", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "监控扫描失败",
+                context="/monitoring/scan",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/monitoring/scan") from e
+
+
+@router.get("/competitors/status", response_model=PlaceholderResponse)
+def competitors_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("competitor").availability()
+    return PlaceholderResponse(
+        module="competitors",
+        enabled=available,
+        message=reason or "竞争对手追踪模块已启用",
     )
 
 
-@router.get("/competitors", response_model=PlaceholderResponse)
-def competitors(_user=Depends(get_current_user)):
-    return _placeholder("competitors", settings.feature_competitors)
+@router.post("/competitors/track")
+def competitor_track(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "competitor.track", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "竞品追踪失败",
+                context="/competitors/track",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/competitors/track") from e
 
 
-@router.get("/contracts", response_model=PlaceholderResponse)
-def contracts(_user=Depends(get_current_user)):
-    return _placeholder("contracts", settings.feature_contract_review)
+@router.post("/competitors/compare")
+def competitor_compare(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "competitor.compare", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "竞品对比失败",
+                context="/competitors/compare",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/competitors/compare") from e
 
 
-@router.get("/patents", response_model=PlaceholderResponse)
-def patents(_user=Depends(get_current_user)):
-    return _placeholder("patents", settings.feature_patent_assist)
+@router.get("/contracts/status", response_model=PlaceholderResponse)
+def contracts_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("contractReview").availability()
+    return PlaceholderResponse(
+        module="contracts",
+        enabled=available,
+        message=reason or "合同审查模块已启用",
+    )
 
 
-@router.get("/policies", response_model=PlaceholderResponse)
-def policies(_user=Depends(get_current_user)):
-    return _placeholder("policies", settings.feature_policy_digest)
+@router.post("/contracts/review")
+def contract_review(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "contract.review", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "合同审查失败",
+                context="/contracts/review",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/contracts/review") from e
 
 
-@router.get("/due-diligence", response_model=PlaceholderResponse)
-def due_diligence(_user=Depends(get_current_user)):
-    return _placeholder("due-diligence", settings.feature_due_diligence)
+@router.get("/patents/status", response_model=PlaceholderResponse)
+def patents_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("patentAssist").availability()
+    return PlaceholderResponse(
+        module="patents",
+        enabled=available,
+        message=reason or "专利/软著申请模块已启用",
+    )
 
+
+@router.post("/patents/assess")
+def patent_assess(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "patent.assess", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "专利评估失败",
+                context="/patents/assess",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/patents/assess") from e
+
+
+@router.get("/policies/status", response_model=PlaceholderResponse)
+def policies_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("policyDigest").availability()
+    return PlaceholderResponse(
+        module="policies",
+        enabled=available,
+        message=reason or "行业政策模块已启用",
+    )
+
+
+@router.post("/policies/digest")
+def policy_digest(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "policy.digest", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "政策摘要失败",
+                context="/policies/digest",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/policies/digest") from e
+
+
+@router.get("/due-diligence/status", response_model=PlaceholderResponse)
+def due_diligence_status(_user=Depends(get_current_user)):
+    available, reason = provider_registry.get("dueDiligence").availability()
+    return PlaceholderResponse(
+        module="due-diligence",
+        enabled=available,
+        message=reason or "融资尽调模块已启用",
+    )
+
+
+@router.post("/due-diligence/investigate")
+def due_diligence_investigate(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        payload = dict(body)
+        payload["_user_id"] = user.id
+        job = enqueue_job(db, "due-diligence.investigate", payload)
+        process_job(db, job)
+        db.refresh(job)
+        if job.status == "failed":
+            raise BusinessError(
+                message=job.error_message or "融资尽调失败",
+                context="/due-diligence/investigate",
+                details={"job_id": job.id, "status": job.status}
+            )
+        return {"job_id": job.id, "status": job.status, "result": job.result}
+    except BusinessError:
+        raise
+    except Exception as e:
+        raise SystemError(message=str(e), error_location="/due-diligence/investigate") from e

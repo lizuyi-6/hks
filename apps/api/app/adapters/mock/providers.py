@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from apps.api.app.adapters.base import make_envelope
 from apps.api.app.ports.interfaces import (
+    CompetitorPort,
+    ContractReviewPort,
     DocumentRenderPort,
+    DueDiligencePort,
     EnterpriseLookupPort,
     KnowledgeBasePort,
     LLMPort,
     MonitoringPort,
     NotificationPort,
+    PatentAssistPort,
+    PolicyDigestPort,
     PublicWebSearchPort,
     SubmissionGuidePort,
     TrademarkSearchPort,
@@ -142,6 +147,16 @@ class MockLlmAdapter(LLMPort):
             normalized_payload={"summary": f"Mock application for {payload.trademark_name}", "highlights": []},
         )
 
+    def analyze_text(self, system_prompt: str, user_prompt: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock llm")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"analysis": "Mock 文本分析结果"},
+        )
+
 
 class MockDocumentRenderAdapter(DocumentRenderPort):
     port_name = "documentRender"
@@ -192,6 +207,16 @@ class MockMonitoringAdapter(MonitoringPort):
             normalized_payload={"query": query, "alerts": []},
         )
 
+    def get_alerts(self, user_id: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock monitoring")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"alerts": [], "total": 0},
+        )
+
 
 class MockSubmissionGuideAdapter(SubmissionGuidePort):
     port_name = "submissionGuide"
@@ -217,3 +242,112 @@ class MockSubmissionGuideAdapter(SubmissionGuidePort):
             normalized_payload=result,
         )
 
+
+class MockCompetitorAdapter(CompetitorPort):
+    port_name = "competitor"
+    provider_name = "mock-competitor"
+    mode = "mock"
+
+    def availability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def track(self, company_name: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock competitor")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={
+                "company": company_name,
+                "trademarks": [],
+                "patents_count": 0,
+                "ip_activity": "low",
+            },
+        )
+
+    def compare(self, companies: list[str], trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock competitor")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"companies": companies, "comparison": {}},
+        )
+
+
+class MockContractReviewAdapter(ContractReviewPort):
+    port_name = "contractReview"
+    provider_name = "mock-contract-review"
+    mode = "mock"
+
+    def availability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def review(self, contract_text: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock contract review")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"risks": [], "summary": "Mock review"},
+        )
+
+
+class MockPatentAssistAdapter(PatentAssistPort):
+    port_name = "patentAssist"
+    provider_name = "mock-patent-assist"
+    mode = "mock"
+
+    def availability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def assess(self, description: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock patent assist")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"assessment": "Mock assessment", "type": "invention"},
+        )
+
+
+class MockPolicyDigestAdapter(PolicyDigestPort):
+    port_name = "policyDigest"
+    provider_name = "mock-policy-digest"
+    mode = "mock"
+
+    def availability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def digest(self, industry: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock policy digest")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"industry": industry, "policies": []},
+        )
+
+
+class MockDueDiligenceAdapter(DueDiligencePort):
+    port_name = "dueDiligence"
+    provider_name = "mock-due-diligence"
+    mode = "mock"
+
+    def availability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def investigate(self, company_name: str, trace_id: str):
+        return make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock due diligence")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"company": company_name, "ip_assets": [], "risks": []},
+        )

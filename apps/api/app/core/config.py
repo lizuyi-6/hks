@@ -26,7 +26,17 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from: str = "noreply@a1plus.local"
+    smtp_use_tls: bool = True
     worker_poll_interval: int = 5
+
+    llm_provider: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
+    llm_base_url: str = ""
+
+    tianyancha_api_key: str = ""
+    bing_search_api_key: str = ""
+    bing_search_endpoint: str = "https://api.bing.microsoft.com/v7.0/search"
     generated_dir: Path = Field(default=ROOT_DIR / "apps" / "api" / ".generated")
     knowledge_base_dir: Path = Field(default=ROOT_DIR / "knowledge-base")
 

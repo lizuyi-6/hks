@@ -2,8 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from apps.api.app.api.routes import assets, auth, diagnosis, jobs, placeholders, reminders, system, trademarks
+from apps.api.app.api.routes import assets, auth, diagnosis, jobs, module_results, placeholders, reminders, suggestions, system, trademarks, workflows
 from apps.api.app.core.database import Base, engine
+from apps.api.app.core.error_handler import register_error_handlers
 from apps.api.app.core.logging import configure_logging
 
 
@@ -15,6 +16,7 @@ async def lifespan(_: FastAPI):
 
 configure_logging()
 app = FastAPI(title="A1+ IP Coworker API", lifespan=lifespan)
+register_error_handlers(app)
 
 
 app.include_router(auth.router)
@@ -24,4 +26,7 @@ app.include_router(assets.router)
 app.include_router(reminders.router)
 app.include_router(jobs.router)
 app.include_router(placeholders.router)
+app.include_router(workflows.router)
+app.include_router(suggestions.router)
+app.include_router(module_results.router)
 app.include_router(system.router)
