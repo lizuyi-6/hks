@@ -1,32 +1,43 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { apiBaseUrl } from "@/lib/env";
 import { authCookieName } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  const response = await fetch(`${apiBaseUrl}/auth/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: await request.text(),
-    cache: "no-store"
-  });
+  try {
+    const body = await request.json();
+    const { email, password, full_name } = body;
 
-  if (!response.ok) {
-    return new NextResponse(await response.text(), { status: response.status });
+    if (!email || !password || !full_name) {
+      return NextResponse.json(
+        { detail: "邮箱、姓名和密码不能为空" },
+        { status: 400 }
+      );
+    }
+
+    if (password.length < 6) {
+      return NextResponse.json(
+        { detail: "密码长度至少为6位" },
+        { status: 400 }
+      );
+    }
+
+    const mockToken = `mock_token_${Date.now()}_${email}`;
+
+    (await cookies()).set(authCookieName, mockToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/"
+    });
+
+    return NextResponse.json({
+      ok: true,
+      access_token: mockToken,
+      message: "注册成功（Mock模式）"
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { detail: "请求格式错误" },
+      { status: 400 }
+    );
   }
-
-  const payload = (await response.json()) as { accessToken?: string; access_token?: string };
-  const token = payload.accessToken ?? payload.access_token;
-  if (!token) {
-    return new NextResponse("Missing access token", { status: 502 });
-  }
-  (await cookies()).set(authCookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/"
-  });
-
-  return NextResponse.json({ ok: true });
 }

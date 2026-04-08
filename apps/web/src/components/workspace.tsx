@@ -495,12 +495,12 @@ export function DiagnosisWorkspace() {
         </form>
       </SectionCard>
 
-      {report ? (
+      {report && report.normalizedPayload ? (
         <>
         <SectionCard
           title="诊断结果"
           eyebrow="Result"
-          actions={<SourceTag mode={report.mode} provider={report.provider} />}
+          actions={<SourceTag mode={report.mode ?? "mock"} provider={report.provider ?? "mock"} />}
         >
           <p className="leading-7 text-slate-700">{report.normalizedPayload.summary}</p>
           <div className="grid gap-4 md:grid-cols-2">

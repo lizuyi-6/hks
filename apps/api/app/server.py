@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from apps.api.app.api.routes import assets, auth, diagnosis, jobs, module_results, placeholders, reminders, suggestions, system, trademarks, workflows
+from apps.api.app.api.routes import assets, auth, diagnosis, jobs, module_results, placeholders, reminders, suggestions, system, trademarks, workflows, analytics
 from apps.api.app.core.database import Base, engine
 from apps.api.app.core.error_handler import register_error_handlers
 from apps.api.app.core.logging import configure_logging
@@ -30,3 +30,4 @@ app.include_router(workflows.router)
 app.include_router(suggestions.router)
 app.include_router(module_results.router)
 app.include_router(system.router)
+app.include_router(analytics.router)
