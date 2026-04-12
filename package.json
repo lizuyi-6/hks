@@ -12,6 +12,8 @@
     "test:web": "npm run test --workspace @a1plus/web",
     "test:api": "python -m pytest apps/api/tests apps/worker/tests",
     "test": "npm run test:web && npm run test:api"
+  },
+  "devDependencies": {
+    "pptxgenjs": "^4.0.1"
   }
 }
-
