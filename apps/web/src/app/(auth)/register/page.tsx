@@ -22,7 +22,7 @@ export default function RegisterPage() {
       body: JSON.stringify({
         email: String(formData.get("email") ?? ""),
         password: String(formData.get("password") ?? ""),
-        full_name: String(formData.get("fullName") ?? "")
+        fullName: String(formData.get("fullName") ?? "")
       })
     });
 
@@ -32,8 +32,7 @@ export default function RegisterPage() {
       return;
     }
 
-    router.push("/dashboard");
-    router.refresh();
+    window.location.href = "/dashboard";
   }
 
   return (

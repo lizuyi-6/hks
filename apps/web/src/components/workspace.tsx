@@ -434,7 +434,8 @@ export function DiagnosisWorkspace() {
         body: JSON.stringify(payload)
       });
 
-      setReport(result);
+      const report = result.result ? result.result : result;
+      setReport(report as Envelope<DiagnosisPayload>);
     } catch (err) {
       setError(err instanceof Error ? err.message : "诊断失败");
     } finally {

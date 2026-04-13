@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     provider_notification_mode: str = "real"
     provider_monitoring_mode: str = "real"
     provider_submission_guide_mode: str = "real"
+    provider_competitor_mode: str = "real"
+    provider_contract_review_mode: str = "real"
+    provider_patent_assist_mode: str = "real"
+    provider_policy_digest_mode: str = "real"
+    provider_due_diligence_mode: str = "real"
 
 
 @lru_cache

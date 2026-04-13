@@ -539,16 +539,15 @@ function getMockResponse(pathname: string, method: string, searchParams?: URLSea
 async function proxy(request: Request, params: { path: string[] }) {
   const pathname = params.path.join("/");
   const url = new URL(request.url);
-  const token = (await cookies()).get(authCookieName)?.value;
+  const cookieToken = (await cookies()).get(authCookieName)?.value;
+  const headerToken = request.headers.get("Authorization")?.replace("Bearer ", "");
+  const token = cookieToken || headerToken;
 
-  if (apiMode === "mock" || pathname in mockResponses || pathname === "module-results") {
+  if (apiMode === "mock") {
     const mockResponse = getMockResponse(pathname, request.method, url.searchParams);
     if (mockResponse) {
       return mockResponse;
     }
-  }
-
-  if (apiMode === "mock") {
     return NextResponse.json([], { status: 200 });
   }
 

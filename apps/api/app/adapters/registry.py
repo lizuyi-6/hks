@@ -111,11 +111,11 @@ class ProviderRegistry:
             "notification": self.settings.provider_notification_mode,
             "monitoring": self.settings.provider_monitoring_mode,
             "submissionGuide": self.settings.provider_submission_guide_mode,
-            "competitor": self.settings.provider_monitoring_mode,
-            "contractReview": self.settings.provider_monitoring_mode,
-            "patentAssist": self.settings.provider_monitoring_mode,
-            "policyDigest": self.settings.provider_monitoring_mode,
-            "dueDiligence": self.settings.provider_monitoring_mode,
+            "competitor": self.settings.provider_competitor_mode,
+            "contractReview": self.settings.provider_contract_review_mode,
+            "patentAssist": self.settings.provider_patent_assist_mode,
+            "policyDigest": self.settings.provider_policy_digest_mode,
+            "dueDiligence": self.settings.provider_due_diligence_mode,
         }
         return mapping.get(port, "real")
 

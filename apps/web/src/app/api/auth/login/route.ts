@@ -2,6 +2,9 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { authCookieName } from "@/lib/auth";
 
+const apiMode = process.env.NEXT_PUBLIC_API_MODE ?? "mock";
+const apiBaseUrl = process.env.NEXT_PRIVATE_API_BASE_URL ?? "http://127.0.0.1:8000";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -14,26 +17,53 @@ export async function POST(request: Request) {
       );
     }
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { detail: "密码长度至少为6位" },
-        { status: 400 }
-      );
+    if (apiMode === "mock") {
+      const mockToken = `mock_token_${Date.now()}_${email}`;
+
+      (await cookies()).set(authCookieName, mockToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/"
+      });
+
+      return NextResponse.json({
+        ok: true,
+        accessToken: mockToken,
+        tokenType: "bearer",
+        message: "登录成功（Mock模式）"
+      });
     }
 
-    const mockToken = `mock_token_${Date.now()}_${email}`;
-
-    (await cookies()).set(authCookieName, mockToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/"
+    const response = await fetch(`${apiBaseUrl}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email, password })
     });
 
-    return NextResponse.json({
-      ok: true,
-      access_token: mockToken,
-      message: "登录成功（Mock模式）"
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      return new NextResponse(errorText, {
+        status: response.status,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+    }
+
+    const data = await response.json();
+    const token = data.accessToken;
+
+    if (token) {
+      (await cookies()).set(authCookieName, token, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/"
+      });
+    }
+
+    return NextResponse.json(data);
   } catch (error) {
     return NextResponse.json(
       { detail: "请求格式错误" },
