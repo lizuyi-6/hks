@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from apps.api.app.schemas.common import DataSourceEnvelope
@@ -72,6 +73,32 @@ class LLMPort(BasePortAdapter, ABC):
         user_prompt: str,
         trace_id: str,
     ) -> DataSourceEnvelope[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def diagnose_stream(
+        self,
+        payload: DiagnosisRequest,
+        knowledge: dict[str, Any],
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def summarize_application_stream(
+        self,
+        payload: ApplicationDraftRequest,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def analyze_text_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
         raise NotImplementedError
 
 

@@ -1,4 +1,5 @@
-FROM node:20-slim
+ARG NODE_IMAGE=hub.rat.dev/node:20-slim
+FROM ${NODE_IMAGE}
 
 WORKDIR /workspace
 

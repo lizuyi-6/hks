@@ -18,6 +18,7 @@ import { legalBoundaryNotice } from "@a1plus/config";
 import { Metric, NextStepCard, PipelineIndicator, SectionCard, SourceTag, StatusBadge } from "@a1plus/ui";
 import { proxyBaseUrl } from "@/lib/env";
 import { parseErrorResponse, ApplicationError, getErrorDisplayInfo } from "@/lib/errors";
+import { fetchSSE } from "@/lib/sse";
 
 type ProviderHealth = {
   providers: Array<{
@@ -405,6 +406,7 @@ export function DiagnosisWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Envelope<DiagnosisPayload> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
 
   useEffect(() => {
     request<ModuleResultItem[]>("/module-results?module_type=diagnosis")
@@ -420,6 +422,7 @@ export function DiagnosisWorkspace() {
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setStreamingText("");
 
     const payload = {
       business_name: String(formData.get("businessName") ?? ""),
@@ -429,13 +432,27 @@ export function DiagnosisWorkspace() {
     };
 
     try {
-      const result = await request<Envelope<DiagnosisPayload>>("/diagnosis", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-
-      const report = result.result ? result.result : result;
-      setReport(report as Envelope<DiagnosisPayload>);
+      await fetchSSE<Envelope<DiagnosisPayload>>(
+        `${proxyBaseUrl}/stream/diagnosis`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        },
+        {
+          onToken: (token) => {
+            setStreamingText(prev => prev + token);
+          },
+          onResult: (result) => {
+            setReport(result);
+            setStreamingText("");
+          },
+          onError: (msg) => {
+            setError(msg);
+            setStreamingText("");
+          }
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "诊断失败");
     } finally {
@@ -485,11 +502,13 @@ export function DiagnosisWorkspace() {
               "生成 IP 保护建议"
             )}
           </button>
-          {loading ? (
+          {streamingText ? (
             <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
-              <p className="text-sm text-rust">
-                ⏳ AI 正在分析业务信息，通常需要 10-20 秒...
-              </p>
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
             </div>
           ) : null}
           {error ? <ErrorDisplay error={error} /> : null}
@@ -609,7 +628,7 @@ export function TrademarkCheckWorkspace({
   }
 
   const riskMeta = useMemo(
-    () => (result ? riskLevelMeta[result.normalizedPayload.riskLevel ?? result.normalizedPayload.risk_level ?? "yellow"] : null),
+    () => (result ? riskLevelMeta[result.normalizedPayload.riskLevel ?? "yellow"] : null),
     [result]
   );
 
@@ -702,7 +721,7 @@ export function TrademarkCheckWorkspace({
                       {finding.name} · 第{finding.category}类
                     </p>
                     <p className="text-sm text-slate-500">
-                      相似度 {finding.similarityScore ?? finding.similarity_score}% · {finding.status}
+                      相似度 {finding.similarityScore}% · {finding.status}
                     </p>
                     <p className="mt-2 text-sm text-slate-600">{finding.note}</p>
                   </div>
@@ -733,19 +752,19 @@ export function TrademarkCheckWorkspace({
             进入申请书生成
           </Link>
         </SectionCard>
-        {(result.normalizedPayload.riskLevel === "green" || result.normalizedPayload.risk_level === "green") ? (
+        {(result.normalizedPayload.riskLevel === "green") ? (
           <NextStepCard
             title="商标可用，建议生成申请书"
             description="查重结果显示商标可用，可以继续进行申请书生成。"
             action={{ label: "前往申请书生成", href: "/trademark/application" }}
           />
-        ) : (result.normalizedPayload.riskLevel === "yellow" || result.normalizedPayload.risk_level === "yellow") ? (
+        ) : (result.normalizedPayload.riskLevel === "yellow") ? (
           <NextStepCard
             title="存在近似商标，请谨慎"
             description="查重发现近似商标，建议仔细评估风险后再决定是否申请。"
             action={{ label: "查看资产台账", href: "/assets" }}
           />
-        ) : (result.normalizedPayload.riskLevel === "red" || result.normalizedPayload.risk_level === "red") ? (
+        ) : (result.normalizedPayload.riskLevel === "red") ? (
           <NextStepCard
             title="存在冲突，建议调整名称"
             description="查重发现明显冲突，建议调整商标名称后重新查重。"
@@ -789,8 +808,8 @@ export function ApplicationWorkspace() {
           const envelope = checkResult as unknown as Envelope<TrademarkCheckResult>;
           setPrefillData((prev) => ({
             ...prev,
-            riskLevel: envelope.normalizedPayload?.riskLevel ?? envelope.normalizedPayload?.risk_level ?? "yellow",
-            categories: envelope.normalizedPayload?.suggestedCategories ?? envelope.normalizedPayload?.suggested_categories
+            riskLevel: envelope.normalizedPayload?.riskLevel ?? "yellow",
+            categories: envelope.normalizedPayload?.suggestedCategories
           }));
         }
       })
@@ -912,7 +931,7 @@ export function ApplicationWorkspace() {
                 申请人 {draft.applicantName} · 类别 {(draft.categories ?? []).join(", ")}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <StatusBadge label={riskLevelMeta[draft.riskLevel ?? draft.risk_level ?? "yellow"].label} tone={(draft.riskLevel === "green" || draft.risk_level === "green") ? "success" : (draft.riskLevel === "yellow" || draft.risk_level === "yellow") ? "warning" : "danger"} />
+                <StatusBadge label={riskLevelMeta[draft.riskLevel ?? "yellow"].label} tone={draft.riskLevel === "green" ? "success" : draft.riskLevel === "yellow" ? "warning" : "danger"} />
                 {(draft.documentLabels ?? []).map((label) => (
                   <StatusBadge key={label} label={label} tone="info" />
                 ))}

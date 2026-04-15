@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -66,6 +68,42 @@ class _LLMClient:
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
+
+    async def chat_stream(self, system_prompt: str, user_prompt: str) -> AsyncGenerator[str, None]:
+        """Stream chat completion tokens from the LLM API."""
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+        timeout = httpx.Timeout(60.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[len("data: "):]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
 
 
 def _build_client(settings) -> _LLMClient | None:
@@ -311,3 +349,151 @@ class RealLlmAdapter(LLMPort):
                 disclaimer="分析结果由规则引擎生成，仅供参考。",
                 normalized_payload={"analysis": f"LLM 调用失败: {exc}", "error": True},
             )
+
+    async def diagnose_stream(
+        self,
+        payload: DiagnosisRequest,
+        knowledge: dict[str, Any],
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        if self._client is None:
+            envelope = self._diagnose_rules(payload, knowledge, trace_id)
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+            return
+
+        user_prompt = DIAGNOSE_USER_TEMPLATE.format(
+            business_name=payload.business_name or "未提供",
+            business_description=payload.business_description,
+            industry=payload.industry or "未提供",
+            stage=payload.stage or "未提供",
+        )
+
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+
+        accumulated = ""
+        try:
+            async for token in self._client.chat_stream(DIAGNOSE_SYSTEM_PROMPT, user_prompt):
+                accumulated += token
+                yield sse_event("token", {"content": token})
+
+            parsed = _extract_json(accumulated)
+            result = DiagnosisResult(
+                summary=parsed.get("summary", ""),
+                priority_assets=parsed.get("priority_assets", []),
+                risks=parsed.get("risks", []),
+                next_actions=parsed.get("next_actions", []),
+                recommended_track=parsed.get("recommended_track", "trademark"),
+                recommended_trademark_categories=parsed.get("recommended_trademark_categories", ["35"]),
+            )
+            envelope = make_envelope(
+                mode=self.mode,
+                provider=self.provider_name,
+                trace_id=trace_id,
+                source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+                disclaimer="诊断结果由 AI 生成，仅供参考，以官方为准。",
+                normalized_payload=result,
+            )
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+        except Exception as exc:
+            logger.warning("LLM diagnose_stream failed, falling back to rules: %s", exc)
+            envelope = self._diagnose_rules(payload, knowledge, trace_id)
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+
+    async def summarize_application_stream(
+        self,
+        payload: ApplicationDraftRequest,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        if self._client is None:
+            envelope = self._summarize_application_rules(payload, trace_id)
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+            return
+
+        user_prompt = APPLICATION_SUMMARY_USER_TEMPLATE.format(
+            trademark_name=payload.trademark_name,
+            applicant_name=payload.applicant_name,
+            categories=", ".join(payload.categories),
+            risk_level=payload.risk_level,
+            business_description=payload.business_description,
+        )
+
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+
+        accumulated = ""
+        try:
+            async for token in self._client.chat_stream(APPLICATION_SUMMARY_SYSTEM_PROMPT, user_prompt):
+                accumulated += token
+                yield sse_event("token", {"content": token})
+
+            parsed = _extract_json(accumulated)
+            envelope = make_envelope(
+                mode=self.mode,
+                provider=self.provider_name,
+                trace_id=trace_id,
+                source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+                disclaimer="申请书摘要由 AI 生成，仅供参考，以官方为准。",
+                normalized_payload={"summary": parsed.get("summary", ""), "highlights": parsed.get("highlights", [])},
+            )
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+        except Exception as exc:
+            logger.warning("LLM summarize_stream failed, falling back to rules: %s", exc)
+            envelope = self._summarize_application_rules(payload, trace_id)
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+
+    async def analyze_text_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        if self._client is None:
+            envelope = make_envelope(
+                mode=self.mode,
+                provider="rules-engine",
+                trace_id=trace_id,
+                source_refs=[SourceRef(title="规则引擎", note="通用文本分析回退")],
+                disclaimer="分析结果由规则引擎生成，仅供参考。",
+                normalized_payload={"analysis": "未配置 LLM，无法执行深度文本分析。"},
+            )
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+            return
+
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+
+        accumulated = ""
+        try:
+            async for token in self._client.chat_stream(system_prompt, user_prompt):
+                accumulated += token
+                yield sse_event("token", {"content": token})
+
+            try:
+                parsed = _extract_json(accumulated)
+            except (json.JSONDecodeError, ValueError):
+                parsed = {"analysis": accumulated}
+
+            envelope = make_envelope(
+                mode=self.mode,
+                provider=self.provider_name,
+                trace_id=trace_id,
+                source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+                disclaimer="分析结果由 AI 生成，仅供参考。",
+                normalized_payload=parsed,
+            )
+            yield sse_event("result", envelope.model_dump(by_alias=True))
+        except Exception as exc:
+            logger.warning("LLM analyze_text_stream failed: %s", exc)
+            envelope = make_envelope(
+                mode=self.mode,
+                provider="rules-engine",
+                trace_id=trace_id,
+                source_refs=[SourceRef(title="规则引擎", note="LLM 调用失败回退")],
+                disclaimer="分析结果由规则引擎生成，仅供参考。",
+                normalized_payload={"analysis": f"LLM 调用失败: {exc}", "error": True},
+            )
+            yield sse_event("result", envelope.model_dump(by_alias=True))

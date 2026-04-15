@@ -421,9 +421,62 @@ const mockResponses: Record<string, { GET?: object | (() => object); POST?: obje
   "placeholders": { GET: [] }
 };
 
+const streamableEndpoints: Record<string, () => object> = {
+  "stream/diagnosis": () => createMockDiagnosisResult().resultData,
+  "stream/contracts/review": () => createContractReviewResult().normalizedPayload,
+  "stream/patents/assess": () => createPatentAssessResult().normalizedPayload,
+  "stream/policies/digest": () => createPolicyDigestResult().normalizedPayload,
+  "stream/due-diligence/investigate": () => createDueDiligenceResult().normalizedPayload,
+};
+
+function createMockSSE(pathname: string): NextResponse {
+  const factory = streamableEndpoints[pathname];
+  const payload = factory ? factory() : { analysis: "Mock streaming result" };
+  const fullText = JSON.stringify(payload);
+
+  const encoder = new TextEncoder();
+  const traceId = `mock-stream-${Date.now()}`;
+  const chunks: Uint8Array[] = [];
+
+  chunks.push(encoder.encode(`event: meta\ndata: ${JSON.stringify({ traceId, provider: "mock", mode: "mock" })}\n\n`));
+
+  const chunkSize = 4;
+  for (let i = 0; i < fullText.length; i += chunkSize) {
+    const token = fullText.slice(i, i + chunkSize);
+    chunks.push(encoder.encode(`event: token\ndata: ${JSON.stringify({ content: token })}\n\n`));
+  }
+
+  chunks.push(encoder.encode(`event: result\ndata: ${JSON.stringify(payload)}\n\n`));
+
+  let index = 0;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(chunks[index++]);
+        await new Promise(r => setTimeout(r, 30));
+      } else {
+        controller.close();
+      }
+    }
+  });
+
+  return new NextResponse(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    }
+  });
+}
+
 function getMockResponse(pathname: string, method: string, searchParams?: URLSearchParams): NextResponse | null {
+  // Streaming endpoints — return SSE mock
+  if (pathname.startsWith("stream/") && method === "POST") {
+    return createMockSSE(pathname);
+  }
+
   if (pathname === "module-results") {
-    const moduleType = searchParams?.get("module_type");
+    const moduleType = searchParams?.get("module_type") ?? null;
     return NextResponse.json(createModuleResultsResponse(moduleType));
   }
 
@@ -446,19 +499,11 @@ function getMockResponse(pathname: string, method: string, searchParams?: URLSea
   const docMatch = pathname.match(/^trademarks\/documents\/([^/]+)\.(docx|pdf)$/);
   if (docMatch && method === "GET") {
     const [, draftId, extension] = docMatch;
-    const contentType = extension === "docx"
-      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      : "application/pdf";
-    const mockContent = extension === "docx"
-      ? "A1+ Trademark Application Draft\n\nTrademark Name: 测试商标\nApplicant: 测试公司\nCategories: 35, 42\n\nThis is a mock document for testing purposes."
-      : "%PDF-1.4\n1 0 obj\n<<\n/Type /Catalog\n/Pages 2 0 R\n>>\nendobj\n2 0 obj\n<<\n/Type /Pages\n/Kids [3 0 R]\n/Count 1\n>>\nendobj\n3 0 obj\n<<\n/Type /Page\n/Parent 2 0 R\n/Resources <<\n/Font <<\n/F1 <<\n/Type /Font\n/Subtype /Type1\n/BaseFont /Helvetica\n>>\n>>\n>>\n/MediaBox [0 0 612 792]\n/Contents 4 0 R\n>>\nendobj\n4 0 obj\n<<\n/Length 200\n>>\nstream\nBT\n/F1 24 Tf\n72 750 Td\n(A1+ Trademark Application Draft) Tj\n0 -30 Td\n/F1 12 Tf\n(Test Trademark) Tj\n0 -20 Td\n(Applicant: Test Company) Tj\n0 -20 Td\n(Categories: 35, 42) Tj\nET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000317 00000 n \ntrailer\n<<\n/Size 5\n/Root 1 0 R\n>>\nstartxref\n563\n%%EOF";
-    return new NextResponse(mockContent, {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${draftId}.${extension}"`,
-        "Content-Length": String(mockContent.length)
-      }
+    return NextResponse.json({
+      mock: true,
+      message: "Mock 模式下不生成真实文档文件。请切换到 real 模式以获取实际文档。",
+      draftId,
+      requestedFormat: extension
     });
   }
 
@@ -573,6 +618,28 @@ async function proxy(request: Request, params: { path: string[] }) {
         headers: {
           "Content-Type": response.headers.get("content-type") ?? "application/octet-stream",
           "Content-Disposition": response.headers.get("content-disposition") ?? "attachment"
+        }
+      });
+    }
+
+    // SSE stream relay
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream") && response.body) {
+      const reader = response.body.getReader();
+      const stream = new ReadableStream({
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) { controller.close(); return; }
+          controller.enqueue(value);
+        },
+        cancel() { reader.cancel(); }
+      });
+      return new NextResponse(stream, {
+        status: response.status,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
         }
       });
     }

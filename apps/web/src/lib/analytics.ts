@@ -66,8 +66,11 @@ class Analytics {
   constructor(config: Partial<AnalyticsConfig> = {}) {
     this.config = { ...defaultConfig, ...config };
     this.sessionId = this.generateSessionId();
-    this.startFlushTimer();
-    this.setupErrorHandler();
+    // Only start timers and error handlers in browser
+    if (typeof window !== "undefined") {
+      this.startFlushTimer();
+      this.setupErrorHandler();
+    }
   }
 
   private generateSessionId(): string {
@@ -91,7 +94,6 @@ class Analytics {
         error_type: "js_error",
         message: String(message),
         stack: error?.stack,
-        timestamp: Date.now()
       });
 
       if (originalOnerror) {
@@ -107,11 +109,10 @@ class Analytics {
         error_type: "js_error",
         message: `Unhandled Promise Rejection: ${event.reason}`,
         stack: event.reason?.stack,
-        timestamp: Date.now()
       });
 
       if (originalUnhandledRejection) {
-        return originalUnhandledRejection(event);
+        return originalUnhandledRejection.call(window, event);
       }
     };
   }

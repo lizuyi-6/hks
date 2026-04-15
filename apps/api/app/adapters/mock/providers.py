@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncGenerator
+
 from apps.api.app.adapters.base import make_envelope
 from apps.api.app.ports.interfaces import (
     CompetitorPort,
@@ -156,6 +159,86 @@ class MockLlmAdapter(LLMPort):
             disclaimer="Mock 数据仅用于测试。",
             normalized_payload={"analysis": "Mock 文本分析结果"},
         )
+
+    async def diagnose_stream(
+        self,
+        payload: DiagnosisRequest,
+        knowledge: dict,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        result = DiagnosisResult(
+            summary=f"Mock 诊断：{payload.business_description}",
+            priority_assets=["商标：第 35 类"],
+            risks=["Mock 风险"],
+            next_actions=["Mock 下一步"],
+            recommended_track="trademark",
+            recommended_trademark_categories=["35"],
+        )
+        envelope = make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock llm")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload=result,
+        )
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+        for chunk in _split_chunks(result.summary):
+            await asyncio.sleep(0.03)
+            yield sse_event("token", {"content": chunk})
+        yield sse_event("result", envelope.model_dump(by_alias=True))
+
+    async def summarize_application_stream(
+        self,
+        payload: ApplicationDraftRequest,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        summary_text = f"Mock application for {payload.trademark_name}"
+        envelope = make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock llm")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"summary": summary_text, "highlights": []},
+        )
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+        for chunk in _split_chunks(summary_text):
+            await asyncio.sleep(0.03)
+            yield sse_event("token", {"content": chunk})
+        yield sse_event("result", envelope.model_dump(by_alias=True))
+
+    async def analyze_text_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[str, None]:
+        from apps.api.app.core.streaming import sse_event
+
+        analysis_text = "Mock 文本分析结果"
+        envelope = make_envelope(
+            mode=self.mode,
+            provider=self.provider_name,
+            trace_id=trace_id,
+            source_refs=[SourceRef(title="mock llm")],
+            disclaimer="Mock 数据仅用于测试。",
+            normalized_payload={"analysis": analysis_text},
+        )
+        yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
+        for chunk in _split_chunks(analysis_text):
+            await asyncio.sleep(0.03)
+            yield sse_event("token", {"content": chunk})
+        yield sse_event("result", envelope.model_dump(by_alias=True))
+
+
+def _split_chunks(text: str, size: int = 4) -> list[str]:
+    """Split text into chunks for simulated streaming."""
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
 class MockDocumentRenderAdapter(DocumentRenderPort):

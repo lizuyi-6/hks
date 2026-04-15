@@ -19,6 +19,8 @@ export type ProbeError = {
 };
 
 export class ApplicationError extends Error {
+  public readonly timestamp: string;
+
   constructor(
     message: string,
     public errorType: ErrorType,
@@ -28,6 +30,7 @@ export class ApplicationError extends Error {
   ) {
     super(message);
     this.name = "ApplicationError";
+    this.timestamp = new Date().toISOString();
   }
 
   toJSON(): ProbeError {

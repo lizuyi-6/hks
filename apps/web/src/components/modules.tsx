@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { NextStepCard, SectionCard, SourceTag, StatusBadge } from "@a1plus/ui";
 import { parseErrorResponse } from "@/lib/errors";
+import { fetchSSE } from "@/lib/sse";
 
 type Envelope<T> = {
   mode: string;
@@ -36,19 +37,26 @@ export function ContractWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<ContractResult> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setStreamingText("");
     try {
-      const response = await request<{ job_id: string; status: string; result?: Envelope<ContractResult> }>("/contracts/review", {
-        method: "POST",
-        body: JSON.stringify({ contract_text: String(formData.get("contractText") ?? "") })
-      });
-      if (!response.result) {
-        throw new Error("审查结果为空");
-      }
-      setResult(response.result);
+      await fetchSSE<Envelope<ContractResult>>(
+        "/api/backend/stream/contracts/review",
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ contract_text: String(formData.get("contractText") ?? "") })
+        },
+        {
+          onToken: (token) => setStreamingText(prev => prev + token),
+          onResult: (envelope) => { setResult(envelope); setStreamingText(""); },
+          onError: (msg) => { setError(msg); setStreamingText(""); }
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "审查失败");
     } finally {
@@ -81,11 +89,13 @@ export function ContractWorkspace() {
               "执行合同审查"
             )}
           </button>
-          {loading ? (
+          {streamingText ? (
             <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
-              <p className="text-sm text-rust">
-                ⏳ AI 正在分析合同文本中的知识产权条款，通常需要 15-30 秒...
-              </p>
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
             </div>
           ) : null}
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -167,19 +177,26 @@ export function PatentWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<PatentResult> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setStreamingText("");
     try {
-      const response = await request<{ job_id: string; status: string; result?: Envelope<PatentResult> }>("/patents/assess", {
-        method: "POST",
-        body: JSON.stringify({ description: String(formData.get("description") ?? "") })
-      });
-      if (!response.result) {
-        throw new Error("评估结果为空");
-      }
-      setResult(response.result);
+      await fetchSSE<Envelope<PatentResult>>(
+        "/api/backend/stream/patents/assess",
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ description: String(formData.get("description") ?? "") })
+        },
+        {
+          onToken: (token) => setStreamingText(prev => prev + token),
+          onResult: (envelope) => { setResult(envelope); setStreamingText(""); },
+          onError: (msg) => { setError(msg); setStreamingText(""); }
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "评估失败");
     } finally {
@@ -219,11 +236,13 @@ export function PatentWorkspace() {
               "执行评估"
             )}
           </button>
-          {loading ? (
+          {streamingText ? (
             <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
-              <p className="text-sm text-rust">
-                ⏳ AI 正在分析技术方案，通常需要 15-30 秒...
-              </p>
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
             </div>
           ) : null}
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -298,19 +317,26 @@ export function PolicyWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<PolicyResult> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setStreamingText("");
     try {
-      const response = await request<{ job_id: string; status: string; result?: Envelope<PolicyResult> }>("/policies/digest", {
-        method: "POST",
-        body: JSON.stringify({ industry: String(formData.get("industry") ?? "") })
-      });
-      if (!response.result) {
-        throw new Error("获取结果为空");
-      }
-      setResult(response.result);
+      await fetchSSE<Envelope<PolicyResult>>(
+        "/api/backend/stream/policies/digest",
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ industry: String(formData.get("industry") ?? "") })
+        },
+        {
+          onToken: (token) => setStreamingText(prev => prev + token),
+          onResult: (envelope) => { setResult(envelope); setStreamingText(""); },
+          onError: (msg) => { setError(msg); setStreamingText(""); }
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取失败");
     } finally {
@@ -342,11 +368,13 @@ export function PolicyWorkspace() {
               "获取政策摘要"
             )}
           </button>
-          {loading ? (
+          {streamingText ? (
             <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
-              <p className="text-sm text-rust">
-                ⏳ AI 正在分析行业政策，通常需要 15-30 秒...
-              </p>
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
             </div>
           ) : null}
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
@@ -419,19 +447,26 @@ export function DueDiligenceWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<DueDiligenceResult> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setStreamingText("");
     try {
-      const response = await request<{ job_id: string; status: string; result?: Envelope<DueDiligenceResult> }>("/due-diligence/investigate", {
-        method: "POST",
-        body: JSON.stringify({ company_name: String(formData.get("companyName") ?? "") })
-      });
-      if (!response.result) {
-        throw new Error("尽调结果为空");
-      }
-      setResult(response.result);
+      await fetchSSE<Envelope<DueDiligenceResult>>(
+        "/api/backend/stream/due-diligence/investigate",
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ company_name: String(formData.get("companyName") ?? "") })
+        },
+        {
+          onToken: (token) => setStreamingText(prev => prev + token),
+          onResult: (envelope) => { setResult(envelope); setStreamingText(""); },
+          onError: (msg) => { setError(msg); setStreamingText(""); }
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "尽调失败");
     } finally {
@@ -463,11 +498,13 @@ export function DueDiligenceWorkspace() {
               "执行 IP 尽调"
             )}
           </button>
-          {loading ? (
+          {streamingText ? (
             <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
-              <p className="text-sm text-rust">
-                ⏳ AI 正在分析目标公司知识产权状况，通常需要 15-30 秒...
-              </p>
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
             </div>
           ) : null}
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}

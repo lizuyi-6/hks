@@ -26,7 +26,7 @@ export function AnalyticsProvider({ children }: AnalyticsProviderProps) {
       }
 
       if (target.tagName === "A" || target.closest("a")) {
-        const link = target.tagName === "A" ? target : target.closest("a") as HTMLAnchorElement;
+        const link = (target.tagName === "A" ? target : target.closest("a")) as HTMLAnchorElement;
         const linkId = link.id || link.getAttribute("data-track-id") || link.href;
         trackClick(`link:${linkId}`);
       }

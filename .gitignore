@@ -16,3 +16,6 @@ apps/api/.db/
 apps/api/test.db
 write-test.tmp
 
+apps/api/.generated/
+*.tsbuildinfo
+
