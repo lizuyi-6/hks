@@ -23,7 +23,8 @@ export async function POST(request: Request) {
       (await cookies()).set(authCookieName, mockToken, {
         httpOnly: true,
         sameSite: "lax",
-        path: "/"
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
       });
 
       return NextResponse.json({
@@ -59,7 +60,8 @@ export async function POST(request: Request) {
       (await cookies()).set(authCookieName, token, {
         httpOnly: true,
         sameSite: "lax",
-        path: "/"
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
       });
     }
 

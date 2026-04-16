@@ -674,6 +674,7 @@ async function proxyWithRetry(
             httpOnly: true,
             sameSite: "lax",
             path: "/",
+            maxAge: 60 * 60 * 24 * 7,
           });
           return proxyWithRetry(request, pathname, url, newToken, body, 1);
         }

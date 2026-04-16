@@ -31,10 +31,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [profileComplete, setProfileComplete] = useState(true);
 
   useEffect(() => {
-    fetch(`${proxyBaseUrl}/workflows?status=running`)
-      .then((res) => res.json() as Promise<WorkflowInstance[]>)
+    fetch(`${proxyBaseUrl}/workflows?status=running`, { credentials: "include" })
+      .then((res) => {
+        if (res.status === 401) { window.location.href = "/login"; return []; }
+        return res.json() as Promise<WorkflowInstance[]>;
+      })
       .then((workflows) => {
-        if (workflows.length > 0) {
+        if (workflows && workflows.length > 0) {
           setActiveWorkflow(workflows[0]);
         }
       })
@@ -43,8 +46,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
-      .then((res) => res.json() as Promise<{ fullName: string; profileComplete: boolean }>)
+      .then((res) => {
+        if (res.status === 401) { window.location.href = "/login"; return null; }
+        return res.json() as Promise<{ fullName: string; profileComplete: boolean }>;
+      })
       .then((data) => {
+        if (!data) return;
         setUserName(data.fullName ?? "");
         setProfileComplete(data.profileComplete ?? false);
       })
