@@ -21,6 +21,15 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(String(255))
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    business_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    applicant_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    applicant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    has_trademark: Mapped[bool | None] = mapped_column(default=False)
+    has_patent: Mapped[bool | None] = mapped_column(default=False)
+    ip_focus: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

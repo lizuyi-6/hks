@@ -407,6 +407,12 @@ export function DiagnosisWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Envelope<DiagnosisPayload> | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [prefill, setPrefill] = useState<{
+    businessName?: string;
+    businessDescription?: string;
+    industry?: string;
+    stage?: string;
+  } | null>(null);
 
   useEffect(() => {
     request<ModuleResultItem[]>("/module-results?module_type=diagnosis")
@@ -417,6 +423,13 @@ export function DiagnosisWorkspace() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
+      .then((res) => res.json() as Promise<{ businessName?: string; businessDescription?: string; industry?: string; stage?: string }>)
+      .then((p) => setPrefill(p))
+      .catch(() => setPrefill({}));
   }, []);
 
   async function handleSubmit(formData: FormData) {
@@ -464,13 +477,21 @@ export function DiagnosisWorkspace() {
     <div className="space-y-6">
       <SectionCard title="IP 快速诊断" eyebrow="Core Flow">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
+          {!prefill ? (
+            <div className="flex items-center justify-center py-4">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+            </div>
+          ) : (
+          <>
           <input
             name="businessName"
+            defaultValue={prefill.businessName ?? ""}
             placeholder="公司名 / 项目名"
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
           />
           <textarea
             name="businessDescription"
+            defaultValue={prefill.businessDescription ?? ""}
             placeholder="描述你的产品、服务、目标客群和商业场景"
             rows={6}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
@@ -479,15 +500,18 @@ export function DiagnosisWorkspace() {
           <div className="grid gap-4 md:grid-cols-2">
             <input
               name="industry"
+              defaultValue={prefill.industry ?? ""}
               placeholder="所属行业，例如：跨境电商 / SaaS"
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
             />
             <input
               name="stage"
+              defaultValue={prefill.stage ?? ""}
               placeholder="企业阶段，例如：初创 / 上线前"
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
             />
           </div>
+          </>)}
           <button
             type="submit"
             disabled={loading}
@@ -576,6 +600,10 @@ export function TrademarkCheckWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<TrademarkCheckResult> | null>(null);
   const [prefillDescription, setPrefillDescription] = useState("");
+  const [profileDefaults, setProfileDefaults] = useState<{
+    applicantName?: string;
+    applicantType?: string;
+  } | null>(null);
 
   useEffect(() => {
     request<ModuleResultItem[]>("/module-results?module_type=trademark-check")
@@ -596,6 +624,16 @@ export function TrademarkCheckWorkspace({
         }
       })
       .catch(() => {});
+
+    fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
+      .then((res) => res.json() as Promise<{ applicantName?: string; applicantType?: string; businessDescription?: string }>)
+      .then((p) => {
+        setProfileDefaults(p);
+        if (!prefillDescription && p.businessDescription) {
+          setPrefillDescription(p.businessDescription);
+        }
+      })
+      .catch(() => setProfileDefaults({}));
   }, []);
 
   async function handleSubmit(formData: FormData) {
@@ -653,6 +691,7 @@ export function TrademarkCheckWorkspace({
           <div className="grid gap-4 md:grid-cols-3">
             <input
               name="applicantName"
+              defaultValue={profileDefaults?.applicantName ?? ""}
               placeholder="申请人名称"
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
               required
@@ -660,7 +699,7 @@ export function TrademarkCheckWorkspace({
             <select
               name="applicantType"
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
-              defaultValue="company"
+              defaultValue={profileDefaults?.applicantType ?? "company"}
             >
               <option value="company">企业</option>
               <option value="individual">个人</option>

@@ -47,6 +47,7 @@ npm run test             # web + api tests
 - Next.js 15 + React 19 + Tailwind 3 + Vitest
 - **BFF layer** (`src/app/api/backend/[...path]/route.ts`) proxies `/api/backend/*` to FastAPI. It also supports a standalone `mock` mode: when `NEXT_PUBLIC_API_MODE=mock` (default), the BFF returns hard-coded JSON/binary responses without hitting the backend.
 - Auth routes (`src/app/api/auth/*`) set an `httpOnly` cookie (`a1plus-session`) in both real and mock modes.
+- SSE client: `lib/sse.ts` provides `fetchSSE<T>()` for consuming backend streaming endpoints.
 - Route groups: `(auth)` for login/register, `(workspace)` for authenticated pages
 - Path alias `@/` → `src/`
 
@@ -55,32 +56,37 @@ npm run test             # web + api tests
 - FastAPI + SQLAlchemy + Pydantic v2 + PostgreSQL + Redis
 - **Hexagonal (ports & adapters) architecture**:
   - `app/ports/interfaces.py` — 14 abstract port interfaces (e.g. `TrademarkSearchPort`, `LLMPort`)
-  - `app/adapters/real/` — production adapters
-  - `app/adapters/mock/providers.py` — mock adapters
+  - `app/adapters/real/` — production adapters (one file per port)
+  - `app/adapters/mock/providers.py` — all 14 mock adapters in a single file
   - `app/adapters/registry.py` — `ProviderRegistry` resolves each port based on `PROVIDER_*_MODE=real|mock`
 - All API responses are wrapped in `DataSourceEnvelope[T]` (generic envelope with `mode`, `traceId`, `sourceRefs`, `disclaimer`)
 - Pydantic models use camelCase aliasing (`to_camel` alias generator) so Python snake_case fields serialize as camelCase JSON
 - Config: `app/core/config.py` reads `.env` via pydantic-settings; defaults to SQLite for dev
-- Routes in `app/api/routes/` — 12 route modules (analytics, assets, auth, diagnosis, jobs, module_results, placeholders, reminders, suggestions, system, trademarks, workflows)
+- Routes in `app/api/routes/` — 13 route modules (analytics, assets, auth, diagnosis, jobs, module_results, placeholders, reminders, stream, suggestions, system, trademarks, workflows)
+- SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence
 - Error handling: `app/core/error_handler.py` defines a typed hierarchy (`ValidationError`, `NotFoundError`, `AuthError`, `BusinessError`, `SystemError`) with structured JSON responses
+- Database models (`app/db/models.py`): `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult` — UUID string PKs, JSON columns
+- Auth: PBKDF2-SHA256 password hashing, HS256 JWT tokens (`app/core/security.py`)
 
 ### Worker (`apps/worker`)
 
 - Polls the database for due jobs (interval `WORKER_POLL_INTERVAL`, default 5s)
 - Processes 10 job types: `diagnosis.report`, `trademark.application`, `monitoring.scan`, `competitor.track`, `competitor.compare`, `contract.review`, `patent.assess`, `policy.digest`, `due-diligence.investigate`, `reminder.dispatch`
 - Job lifecycle: `queued → processing → completed | failed → (retry up to 3) → dead_letter`
+- `enqueue_job()` uses SHA-256 of sorted JSON payload as idempotency key to prevent duplicate jobs
 - Uses the same adapter registry as the API
 
 ### Workflow Engine
 
 - `apps/api/app/services/workflow_engine.py` orchestrates multi-step flows (e.g. `trademark-registration`: diagnosis → check → application → submit guide → ledger)
 - Step outputs are deep-merged into workflow context for downstream steps
+- `get_suggestions()` generates contextual suggestions based on user state (running workflows, completed diagnoses, expiring assets)
 
 ### Shared TS Packages
 
-- `packages/domain` — shared domain types and flow definitions
-- `packages/config` — feature flags, provider mode config, navigation, legal boundary notice text
-- `packages/ui` — shared atomic UI components
+- `packages/domain` — shared domain types, `modules` array (11 module definitions), `coreWorkflow`, `riskLevelMeta`
+- `packages/config` — feature flags, provider mode config, `legalBoundaryNotice` constant
+- `packages/ui` — shared atomic components (`SectionCard`, `SourceTag`, `StatusBadge`, `Metric`, `PipelineIndicator`, `NextStepCard`)
 
 ### Knowledge Base (`knowledge-base/`)
 
@@ -92,11 +98,12 @@ npm run test             # web + api tests
 
 ## Key Patterns
 
+- **Dual mock system**: The frontend BFF has its own complete mock responses (in `[...path]/route.ts`) that are independent of the backend's mock adapters. When `NEXT_PUBLIC_API_MODE=mock`, the frontend never touches FastAPI at all. When `real`, the BFF proxies to FastAPI, which may itself use mock adapters based on `PROVIDER_*_MODE`.
 - **Feature flags**: `FEATURE_*` env vars control module visibility; disabled modules return `PlaceholderResponse`
-- **Provider mode switching**: 14 provider ports each have `PROVIDER_*_MODE=real|mock`; set to `mock` to work without real APIs. Frontend also respects `NEXT_PUBLIC_API_MODE=mock`.
 - **Data mode transparency**: Responses never aggregate real and mock data; `mode` field is always explicit
 - **Legal boundary**: All user-facing outputs must include the disclaimer from `packages/config` (`legalBoundaryNotice`)
-- **Unified errors**: Backend raises typed `APIError` subclasses; frontend parses them into `ApplicationError` via `lib/errors.ts`
+- **Unified errors**: Backend raises typed `APIError` subclasses; frontend parses them into `ApplicationError` via `lib/errors.ts` — both share the same type hierarchy
+- **No global state**: Frontend components use local `useState`/`useEffect` with direct `fetch()` calls to the BFF
 
 ## Environment Variables
 
@@ -123,8 +130,9 @@ Key vars beyond the obvious DB/Redis URLs:
 
 ## Testing Notes
 
-- API tests use `conftest.py` fixtures: `client` (FastAPI `TestClient`) and `auth_headers`; database is reset before each test automatically
+- API tests use `conftest.py` fixtures: `client` (FastAPI `TestClient`) and `auth_headers`; database tables are dropped/recreated before each test automatically
 - Frontend tests run in Node environment (not jsdom); test files match `src/**/*.test.ts`
+- CI pipeline (`.github/workflows/ci.yml`): lint+build-web, test-api, test-worker, docker-build; deploy stages on push to `develop` (staging) and `main` (production)
 
 ## Docker
 
@@ -132,8 +140,7 @@ Key vars beyond the obvious DB/Redis URLs:
 
 ## Frontend Conventions
 
-- No global state library — components use local `useState`/`useEffect` with direct `fetch()` calls to the BFF
 - Auth helpers live in `lib/auth.ts` (`getSessionToken()`, `isAuthenticated()`); session is the `a1plus-session` httpOnly cookie
 - `lib/env.ts` exports `apiBaseUrl` / `proxyBaseUrl` used by BFF and components
-- `lib/analytics.ts` provides batched event tracking; only active in browser (SSR-safe)
+- `lib/analytics.ts` provides batched event tracking (5s interval, 50 event max); only active in browser (SSR-safe)
 - `middleware.ts` injects `x-pathname` header for server-side request tracking; it excludes API routes and static assets

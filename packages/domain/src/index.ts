@@ -8,6 +8,23 @@ export type BusinessProfile = {
   stage?: string;
 };
 
+export type UserProfile = {
+  id: string;
+  email: string;
+  fullName: string;
+  businessName?: string;
+  businessDescription?: string;
+  industry?: string;
+  stage?: string;
+  applicantType?: "individual" | "company";
+  applicantName?: string;
+  hasTrademark?: boolean;
+  hasPatent?: boolean;
+  ipFocus?: string;
+  profileComplete: boolean;
+  createdAt: string;
+};
+
 export type TrademarkCheckRequest = {
   trademarkName: string;
   businessDescription: string;

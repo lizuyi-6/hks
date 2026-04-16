@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: hub.rat.dev/postgres:16
+    image: postgres:16
     environment:
       POSTGRES_DB: a1plus
       POSTGRES_USER: postgres
@@ -16,9 +16,9 @@ services:
       retries: 5
 
   redis:
-    image: hub.rat.dev/redis:7-alpine
+    image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,7 +32,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/a1plus
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/a1plus
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -55,7 +55,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/a1plus
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/a1plus
       REDIS_URL: redis://redis:6379/0
     command: ["python", "-m", "apps.worker.main"]
     depends_on:
@@ -72,9 +72,9 @@ services:
       - .env
     environment:
       NEXT_PRIVATE_API_BASE_URL: http://api:8000
-      NEXT_PUBLIC_API_BASE_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       api:
         condition: service_healthy

@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=hub.rat.dev/node:20-slim
+ARG NODE_IMAGE=node:20-slim
 FROM ${NODE_IMAGE}
 
 WORKDIR /workspace
@@ -15,6 +15,10 @@ COPY . .
 
 RUN npm run build:web
 
+# Next.js standalone needs static assets and public folder copied into the standalone output
+RUN cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static && \
+    cp -r apps/web/public apps/web/.next/standalone/apps/web/public 2>/dev/null || true
+
 EXPOSE 3000
 
-CMD ["node", "apps/web/.next/standalone/server.js"]
+CMD ["node", "apps/web/.next/standalone/apps/web/server.js"]

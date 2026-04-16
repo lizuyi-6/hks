@@ -4,6 +4,7 @@ import { useState } from "react";
 import { NextStepCard, SectionCard, SourceTag, StatusBadge } from "@a1plus/ui";
 import { parseErrorResponse } from "@/lib/errors";
 import { fetchSSE } from "@/lib/sse";
+import { FileUpload } from "@/components/file-upload";
 
 type Envelope<T> = {
   mode: string;
@@ -38,6 +39,7 @@ export function ContractWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<ContractResult> | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [contractText, setContractText] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -68,8 +70,11 @@ export function ContractWorkspace() {
     <div className="space-y-6">
       <SectionCard title="合同审查" eyebrow="Contract Review">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
+          <FileUpload onTextExtracted={setContractText} label="上传合同文件，自动提取文本" />
           <textarea
             name="contractText"
+            value={contractText}
+            onChange={(e) => setContractText(e.target.value)}
             placeholder="粘贴合同文本，系统将自动识别 IP 相关条款并给出风险提示..."
             rows={10}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
@@ -178,6 +183,7 @@ export function PatentWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Envelope<PatentResult> | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [description, setDescription] = useState("");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -215,8 +221,11 @@ export function PatentWorkspace() {
     <div className="space-y-6">
       <SectionCard title="专利/软著评估" eyebrow="Patent & Copyright">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
+          <FileUpload onTextExtracted={setDescription} label="上传技术文档，自动提取描述" />
           <textarea
             name="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
             placeholder="描述你的技术方案、产品功能或创新点..."
             rows={6}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"

@@ -567,6 +567,62 @@ function getMockResponse(pathname: string, method: string, searchParams?: URLSea
     return NextResponse.json(mockAssets[0]);
   }
 
+  if (pathname === "profile/status" && method === "GET") {
+    return NextResponse.json({ hasProfile: true, profileComplete: true });
+  }
+
+  if (pathname === "profile" && method === "GET") {
+    return NextResponse.json({
+      id: "mock-user-1",
+      email: "mock@example.com",
+      fullName: "演示用户",
+      businessName: "示例科技有限公司",
+      businessDescription: "跨境电商 SaaS 平台，提供一站式出海解决方案",
+      industry: "跨境电商",
+      stage: "growth",
+      applicantType: "company",
+      applicantName: "示例科技有限公司",
+      hasTrademark: true,
+      hasPatent: false,
+      ipFocus: "trademark,patent",
+      profileComplete: true,
+      createdAt: now
+    });
+  }
+
+  if (pathname === "profile" && method === "PUT") {
+    return NextResponse.json({
+      id: "mock-user-1",
+      email: "mock@example.com",
+      fullName: "演示用户",
+      profileComplete: true,
+      createdAt: now
+    });
+  }
+
+  if (pathname === "upload/extract-text" && method === "POST") {
+    return NextResponse.json({
+      text: "这是一段从模拟文档中提取的合同文本。甲方：示例科技有限公司，乙方：合作方公司。本合同涉及知识产权归属条款、保密义务、竞业限制等内容。根据合同约定，双方在合作期间产生的知识产权归甲方所有，乙方不得擅自使用或披露相关技术秘密。合同有效期为三年，自签署之日起生效。",
+      filename: "mock-contract.pdf",
+      charCount: 120,
+    });
+  }
+
+  if (pathname === "upload/parse-business-license" && method === "POST") {
+    return NextResponse.json({
+      fields: {
+        businessName: "示例科技有限公司",
+        industry: "软件和信息技术服务",
+        applicantName: "示例科技有限公司",
+        legalPerson: "张三",
+        registeredCapital: "100万元",
+        address: "北京市海淀区中关村大街1号",
+      },
+      filename: "mock-license.pdf",
+      extractedCharCount: 200,
+    });
+  }
+
   const mock = mockResponses[pathname];
   if (!mock) {
     return null;

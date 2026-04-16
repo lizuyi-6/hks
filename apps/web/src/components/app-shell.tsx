@@ -27,6 +27,8 @@ const stepTypeNames: Record<string, string> = {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [activeWorkflow, setActiveWorkflow] = useState<WorkflowInstance | null>(null);
+  const [userName, setUserName] = useState<string>("");
+  const [profileComplete, setProfileComplete] = useState(true);
 
   useEffect(() => {
     fetch(`${proxyBaseUrl}/workflows?status=running`)
@@ -39,10 +41,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
+      .then((res) => res.json() as Promise<{ fullName: string; profileComplete: boolean }>)
+      .then((data) => {
+        setUserName(data.fullName ?? "");
+        setProfileComplete(data.profileComplete ?? false);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(160,74,42,0.12),_transparent_32%),linear-gradient(180deg,#f8f3eb_0%,#fefcf8_32%,#f6efe4_100%)] text-ink">
       <div className="mx-auto flex min-h-screen max-w-7xl gap-6 px-4 py-6 lg:px-8">
-        <aside className="hidden w-72 shrink-0 rounded-[32px] border border-white/70 bg-[#fffaf2]/85 p-6 shadow-soft backdrop-blur lg:block">
+        <aside className="hidden w-72 shrink-0 flex-col rounded-[32px] border border-white/70 bg-[#fffaf2]/85 p-6 shadow-soft backdrop-blur lg:flex">
           <p className="text-xs font-semibold uppercase tracking-[0.32em] text-rust">
             A1+ IP Coworker
           </p>
@@ -98,6 +110,27 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+          <div className="mt-auto pt-6">
+            <Link
+              href="/profile"
+              className={cn(
+                "flex items-center gap-3 rounded-2xl border px-4 py-3 transition",
+                pathname === "/profile"
+                  ? "border-rust/30 bg-rust/10 text-slate-950"
+                  : "border-transparent bg-white/60 text-slate-600 hover:border-slate-200 hover:bg-white"
+              )}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rust/15 text-sm font-semibold text-rust">
+                {userName ? userName.charAt(0) : "?"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{userName || "用户"}</p>
+                {!profileComplete && (
+                  <p className="text-xs text-amber-600">完善资料</p>
+                )}
+              </div>
+            </Link>
+          </div>
         </aside>
         <main className="flex-1 space-y-6">{children}</main>
       </div>
