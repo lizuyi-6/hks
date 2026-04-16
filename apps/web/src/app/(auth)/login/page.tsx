@@ -70,6 +70,12 @@ export default function LoginPage() {
             创建账户
           </Link>
         </p>
+        <p className="text-sm text-slate-500">
+          忘记密码？{" "}
+          <Link href="/forgot-password" className="font-semibold text-rust">
+            重置密码
+          </Link>
+        </p>
       </SectionCard>
     </main>
   );

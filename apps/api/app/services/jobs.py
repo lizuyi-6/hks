@@ -21,6 +21,7 @@ def _save_module_result(db: Session, job: JobRecord, module_type: str, result_da
     from apps.api.app.db.models import ModuleResult
     mr = ModuleResult(
         user_id=job.payload.get("_user_id"),
+        tenant_id=job.tenant_id,
         module_type=module_type,
         job_id=job.id,
         result_data=result_data,
@@ -54,6 +55,7 @@ def enqueue_job(
         payload=payload,
         run_after=run_after or utcnow(),
         idempotency_key=idempotency_key,
+        tenant_id=payload.get("_tenant_id"),
     )
     db.add(job)
     db.commit()
@@ -135,6 +137,8 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
                 expires_at=utcnow() + timedelta(days=3650),
                 next_milestone="Awaiting official review",
                 source_mode=provider_registry.mode_for("documentRender"),
+                tenant_id=job.tenant_id,
+                owner_id=job.payload.get("_user_id"),
             )
             db.add(asset)
             db.flush()

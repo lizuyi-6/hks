@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.database import SessionLocal, get_db
+from apps.api.app.db.models import JobRecord
 from apps.api.app.schemas.common import JobResponse
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.jobs import get_job_or_error, process_job, rerun_job
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,13 @@ def _process_in_background(job_id: str) -> None:
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-def get_job(job_id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    try:
-        job = get_job_or_error(db, job_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def get_job(job_id: str, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
+    q = db.query(JobRecord).filter(JobRecord.id == job_id)
+    if ctx.tenant:
+        q = q.filter(JobRecord.tenant_id == ctx.tenant.id)
+    job = q.first()
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
 
     if job.status in {"queued", "failed"}:
         job.status = "processing"
@@ -54,11 +57,14 @@ def get_job(job_id: str, db: Session = Depends(get_db), _user=Depends(get_curren
 
 
 @router.post("/{identifier}/rerun", response_model=JobResponse)
-def rerun(identifier: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+def rerun(identifier: str, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         job = rerun_job(db, identifier)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if ctx.tenant and job.tenant_id != ctx.tenant.id:
+        raise HTTPException(status_code=404, detail="任务不存在")
 
     return JobResponse(
         id=job.id,

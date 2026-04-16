@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.database import get_db
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.workflow_engine import (
     advance_workflow,
     create_workflow,
@@ -43,7 +43,7 @@ def _workflow_to_dict(instance) -> dict:
 
 
 @router.post("")
-def create(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     workflow_type = body.get("workflow_type")
     if not workflow_type:
         raise HTTPException(status_code=400, detail="workflow_type is required")
@@ -51,9 +51,10 @@ def create(body: dict, db: Session = Depends(get_db), user=Depends(get_current_u
     try:
         instance = create_workflow(
             db,
-            user_id=user.id,
+            user_id=ctx.user.id,
             workflow_type=workflow_type,
             initial_context=body.get("initial_context"),
+            tenant_id=ctx.tenant.id if ctx.tenant else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -65,20 +66,25 @@ def create(body: dict, db: Session = Depends(get_db), user=Depends(get_current_u
 def list_workflows(
     status: str | None = None,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx: TenantContext = Depends(get_current_tenant),
 ):
-    instances = get_user_workflows(db, user_id=user.id, status=status)
+    instances = get_user_workflows(
+        db,
+        tenant_id=ctx.tenant.id if ctx.tenant else None,
+        user_id=ctx.user.id,
+        status=status,
+    )
     return [_workflow_to_dict(i) for i in instances]
 
 
 @router.get("/{workflow_id}")
-def get_detail(workflow_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def get_detail(workflow_id: str, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         instance = get_workflow_detail(db, workflow_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if instance.user_id != user.id:
+    if ctx.tenant and instance.tenant_id != ctx.tenant.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     return _workflow_to_dict(instance)
@@ -89,14 +95,14 @@ def advance(
     workflow_id: str,
     body: dict,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
         instance = get_workflow_detail(db, workflow_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if instance.user_id != user.id:
+    if ctx.tenant and instance.tenant_id != ctx.tenant.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     try:

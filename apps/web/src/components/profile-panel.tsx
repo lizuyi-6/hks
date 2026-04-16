@@ -266,7 +266,99 @@ export function ProfilePanel() {
           {error && <p className="text-sm text-rose-600">{error}</p>}
         </form>
       </SectionCard>
+
+      <ChangePasswordCard />
     </div>
+  );
+}
+
+function ChangePasswordCard() {
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const oldPassword = String(fd.get("oldPassword") ?? "");
+    const newPassword = String(fd.get("newPassword") ?? "");
+    const confirmPassword = String(fd.get("confirmPassword") ?? "");
+
+    if (newPassword !== confirmPassword) {
+      setError("两次密码不一致");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError("新密码至少 6 位");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSaved(false);
+
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          old_password: oldPassword,
+          new_password: newPassword,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+      setSaved(true);
+      (e.target as HTMLFormElement).reset();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "修改失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const inputCls =
+    "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring";
+
+  return (
+    <SectionCard title="修改密码" eyebrow="Security">
+      <form onSubmit={handleSubmit} className="grid gap-4">
+        <input
+          name="oldPassword"
+          type="password"
+          placeholder="当前密码"
+          className={inputCls}
+          required
+        />
+        <input
+          name="newPassword"
+          type="password"
+          placeholder="新密码（至少 6 位）"
+          className={inputCls}
+          required
+          minLength={6}
+        />
+        <input
+          name="confirmPassword"
+          type="password"
+          placeholder="确认新密码"
+          className={inputCls}
+          required
+          minLength={6}
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? "修改中..." : "修改密码"}
+        </button>
+        {saved && <p className="text-sm text-emerald-600">密码已更新</p>}
+        {error && <p className="text-sm text-rose-600">{error}</p>}
+      </form>
+    </SectionCard>
   );
 }
 

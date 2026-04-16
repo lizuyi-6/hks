@@ -637,6 +637,55 @@ function getMockResponse(pathname: string, method: string, searchParams?: URLSea
   return NextResponse.json(data);
 }
 
+async function proxyWithRetry(
+  request: Request,
+  pathname: string,
+  url: URL,
+  token: string | undefined,
+  body: ArrayBuffer | undefined,
+  attempt: number = 0
+): Promise<Response> {
+  const target = `${apiBaseUrl}/${pathname}${url.search}`;
+
+  const response = await fetch(target, {
+    method: request.method,
+    headers: {
+      ...(request.headers.get("content-type")
+        ? { "Content-Type": request.headers.get("content-type") as string }
+        : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: request.method === "GET" ? undefined : body,
+    cache: "no-store"
+  });
+
+  if (response.status === 401 && token && attempt === 0) {
+    try {
+      const refreshRes = await fetch(`${apiBaseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (refreshRes.ok) {
+        const data = await refreshRes.json();
+        const newToken = data.accessToken;
+        if (newToken) {
+          (await cookies()).set(authCookieName, newToken, {
+            httpOnly: true,
+            sameSite: "lax",
+            path: "/",
+          });
+          return proxyWithRetry(request, pathname, url, newToken, body, 1);
+        }
+      }
+    } catch {
+      // refresh failed, return original 401
+    }
+  }
+
+  return response;
+}
+
 async function proxy(request: Request, params: { path: string[] }) {
   const pathname = params.path.join("/");
   const url = new URL(request.url);
@@ -652,20 +701,10 @@ async function proxy(request: Request, params: { path: string[] }) {
     return NextResponse.json([], { status: 200 });
   }
 
-  const target = `${apiBaseUrl}/${pathname}${url.search}`;
+  const body = request.method !== "GET" ? await request.arrayBuffer() : undefined;
 
   try {
-    const response = await fetch(target, {
-      method: request.method,
-      headers: {
-        ...(request.headers.get("content-type")
-          ? { "Content-Type": request.headers.get("content-type") as string }
-          : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      body: request.method === "GET" ? undefined : await request.arrayBuffer(),
-      cache: "no-store"
-    });
+    const response = await proxyWithRetry(request, pathname, url, token, body);
 
     if (pathname.includes("/documents/") || pathname.startsWith("documents/")) {
       const buffer = await response.arrayBuffer();

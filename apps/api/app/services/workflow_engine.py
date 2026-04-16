@@ -48,6 +48,7 @@ def create_workflow(
     user_id: str,
     workflow_type: str,
     initial_context: dict | None = None,
+    tenant_id: str | None = None,
 ) -> WorkflowInstance:
     template = WORKFLOW_TEMPLATES.get(workflow_type)
     if template is None:
@@ -56,6 +57,7 @@ def create_workflow(
     context = initial_context or {}
     instance = WorkflowInstance(
         user_id=user_id,
+        tenant_id=tenant_id,
         workflow_type=workflow_type,
         status="pending",
         context=context,
@@ -172,12 +174,16 @@ def fail_workflow_step(
     return instance
 
 
-def get_suggestions(db: Session, user_id: str) -> list[dict]:
+def get_suggestions(db: Session, user_id: str, tenant_id: str | None = None) -> list[dict]:
     suggestions: list[dict] = []
+
+    wf_filter = WorkflowInstance.user_id == user_id
+    if tenant_id:
+        wf_filter = WorkflowInstance.tenant_id == tenant_id
 
     running_workflows = (
         db.query(WorkflowInstance)
-        .filter(WorkflowInstance.user_id == user_id)
+        .filter(wf_filter)
         .filter(WorkflowInstance.status == "running")
         .all()
     )
@@ -198,9 +204,13 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
                 "priority": 10,
             })
 
+    mr_filter = ModuleResult.user_id == user_id
+    if tenant_id:
+        mr_filter = ModuleResult.tenant_id == tenant_id
+
     diagnosis_results = (
         db.query(ModuleResult)
-        .filter(ModuleResult.user_id == user_id)
+        .filter(mr_filter)
         .filter(ModuleResult.module_type == "diagnosis")
         .order_by(ModuleResult.created_at.desc())
         .limit(1)
@@ -210,7 +220,7 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
         diagnosis_steps = (
             db.query(WorkflowStep)
             .join(WorkflowInstance)
-            .filter(WorkflowInstance.user_id == user_id)
+            .filter(wf_filter)
             .filter(WorkflowStep.step_type == "diagnosis")
             .filter(WorkflowStep.status == "completed")
             .order_by(WorkflowStep.created_at.desc())
@@ -223,7 +233,7 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
     if diagnosis_results:
         has_running_tm_check = (
             db.query(WorkflowInstance)
-            .filter(WorkflowInstance.user_id == user_id)
+            .filter(wf_filter)
             .filter(WorkflowInstance.workflow_type == "trademark-registration")
             .filter(WorkflowInstance.status.in_(["running", "pending"]))
             .first()
@@ -242,7 +252,7 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
 
     all_workflows = (
         db.query(WorkflowInstance)
-        .filter(WorkflowInstance.user_id == user_id)
+        .filter(wf_filter)
         .first()
     )
     if not all_workflows and not diagnosis_results:
@@ -259,9 +269,13 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
 
     now = utcnow()
     threshold = now + timedelta(days=90)
+    asset_filter = IpAsset.owner_id == user_id
+    if tenant_id:
+        asset_filter = IpAsset.tenant_id == tenant_id
+
     expiring_assets = (
         db.query(IpAsset)
-        .filter(IpAsset.owner_id == user_id)
+        .filter(asset_filter)
         .filter(IpAsset.expires_at != None)
         .filter(IpAsset.expires_at <= threshold)
         .filter(IpAsset.expires_at >= now)
@@ -286,13 +300,18 @@ def get_suggestions(db: Session, user_id: str) -> list[dict]:
 
 def get_user_workflows(
     db: Session,
-    user_id: str,
+    user_id: str | None = None,
+    tenant_id: str | None = None,
     status: str | None = None,
 ) -> list[WorkflowInstance]:
     query = (
         db.query(WorkflowInstance)
         .options(joinedload(WorkflowInstance.steps))
-        .filter(WorkflowInstance.user_id == user_id)
+    )
+    if tenant_id:
+        query = query.filter(WorkflowInstance.tenant_id == tenant_id)
+    elif user_id:
+        query = query.filter(WorkflowInstance.user_id == user_id)
     )
     if status:
         query = query.filter(WorkflowInstance.status == status)

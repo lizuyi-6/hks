@@ -6,7 +6,7 @@ from apps.api.app.core.database import get_db
 from apps.api.app.core.error_handler import BusinessError, SystemError
 from apps.api.app.schemas.common import JobResponse
 from apps.api.app.schemas.diagnosis import DiagnosisRequest
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.jobs import enqueue_job, process_job
 
 
@@ -17,10 +17,13 @@ router = APIRouter(prefix="/diagnosis", tags=["diagnosis"])
 def run_diagnosis(
     payload: DiagnosisRequest,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
-        job = enqueue_job(db, "diagnosis.report", payload.model_dump(mode="json"))
+        data = payload.model_dump(mode="json")
+        if _ctx.tenant:
+            data["_tenant_id"] = _ctx.tenant.id
+        job = enqueue_job(db, "diagnosis.report", data)
         process_job(db, job)
         db.refresh(job)
         if job.status == "failed":
@@ -47,10 +50,13 @@ def run_diagnosis(
 def create_diagnosis_job(
     payload: DiagnosisRequest,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
-        job = enqueue_job(db, "diagnosis.report", payload.model_dump(mode="json"))
+        data = payload.model_dump(mode="json")
+        if _ctx.tenant:
+            data["_tenant_id"] = _ctx.tenant.id
+        job = enqueue_job(db, "diagnosis.report", data)
         return JobResponse(
             id=job.id,
             job_type=job.job_type,

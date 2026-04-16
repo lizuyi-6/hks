@@ -10,7 +10,7 @@ from apps.api.app.core.database import get_db
 from apps.api.app.core.error_handler import BusinessError, NotFoundError, SystemError, ValidationError
 from apps.api.app.schemas.common import JobResponse
 from apps.api.app.schemas.trademark import ApplicationDraftRequest, TrademarkCheckRequest
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.jobs import (
     build_submission_bundle,
     document_path_for,
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/trademarks", tags=["trademarks"])
 @router.post("/check")
 def check_trademark(
     payload: TrademarkCheckRequest,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
         result = provider_registry.get("trademarkSearch").search(payload, trace_id=str(uuid4()))
@@ -39,10 +39,13 @@ def check_trademark(
 def create_application_job(
     payload: ApplicationDraftRequest,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
-        job = enqueue_job(db, "trademark.application", payload.model_dump(mode="json"))
+        data = payload.model_dump(mode="json")
+        if _ctx.tenant:
+            data["_tenant_id"] = _ctx.tenant.id
+        job = enqueue_job(db, "trademark.application", data)
         process_job(db, job)
         db.refresh(job)
         if job.status == "failed":
@@ -69,7 +72,7 @@ def create_application_job(
 def get_draft_bundle(
     draft_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     try:
         return build_submission_bundle(db, draft_id)
@@ -84,7 +87,7 @@ def download_document(
     draft_id: str,
     extension: str,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     if extension not in {"docx", "pdf"}:
         raise ValidationError(message="不支持的文件类型", field="/trademarks/documents")

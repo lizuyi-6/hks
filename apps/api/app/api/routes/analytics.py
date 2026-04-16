@@ -2,7 +2,11 @@ from datetime import datetime
 from typing import Any
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from apps.api.app.core.database import get_db
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +21,7 @@ async def receive_events(request: dict):
         events = request.get("events", [])
         session_id = request.get("session_id")
         user_id = request.get("user_id")
+        tenant_id = request.get("tenant_id")
 
         if not events:
             return {"ok": True, "received": 0}
@@ -30,6 +35,7 @@ async def receive_events(request: dict):
                 "page": event.get("page"),
                 "session_id": session_id,
                 "user_id": user_id,
+                "tenant_id": tenant_id,
                 "created_at": datetime.utcnow().isoformat(),
             }
             analytics_storage.append(event_record)
@@ -63,8 +69,12 @@ async def get_events(
     event_type: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    ctx: TenantContext = Depends(get_current_tenant),
 ):
     filtered = analytics_storage
+
+    if ctx.tenant:
+        filtered = [e for e in filtered if e.get("tenant_id") == ctx.tenant.id]
 
     if page:
         filtered = [e for e in filtered if e.get("page") == page]
@@ -84,8 +94,12 @@ async def get_events(
 
 
 @router.get("/stats")
-async def get_stats():
-    if not analytics_storage:
+async def get_stats(ctx: TenantContext = Depends(get_current_tenant)):
+    filtered = analytics_storage
+    if ctx.tenant:
+        filtered = [e for e in filtered if e.get("tenant_id") == ctx.tenant.id]
+
+    if not filtered:
         return {
             "total_events": 0,
             "event_types": {},
@@ -97,7 +111,7 @@ async def get_stats():
     errors = 0
     slow_apis = 0
 
-    for event in analytics_storage:
+    for event in filtered:
         event_type = event.get("event_type", "unknown")
         event_types[event_type] = event_types.get(event_type, 0) + 1
 
@@ -112,7 +126,7 @@ async def get_stats():
                 slow_apis += 1
 
     return {
-        "total_events": len(analytics_storage),
+        "total_events": len(filtered),
         "event_types": event_types,
         "pages": pages,
         "errors": errors,
@@ -121,8 +135,13 @@ async def get_stats():
 
 
 @router.delete("/events")
-async def clear_events():
+async def clear_events(ctx: TenantContext = Depends(get_current_tenant)):
     global analytics_storage
-    count = len(analytics_storage)
-    analytics_storage = []
-    return {"ok": True, "cleared": count}
+    if ctx.tenant:
+        analytics_storage = [e for e in analytics_storage if e.get("tenant_id") != ctx.tenant.id]
+        cleared = len(analytics_storage)
+    else:
+        count = len(analytics_storage)
+        analytics_storage = []
+        cleared = count
+    return {"ok": True, "cleared": cleared}

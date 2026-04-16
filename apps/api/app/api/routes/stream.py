@@ -13,7 +13,7 @@ from apps.api.app.adapters.real.policy_digest import POLICY_DIGEST_SYSTEM_PROMPT
 from apps.api.app.adapters.registry import provider_registry
 from apps.api.app.core.streaming import streaming_response
 from apps.api.app.schemas.diagnosis import DiagnosisRequest
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
 
@@ -34,7 +34,7 @@ async def _wrap_analyze_text_stream(
 @router.post("/diagnosis")
 async def stream_diagnosis(
     payload: DiagnosisRequest,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-diag-{uuid.uuid4().hex[:12]}"
     llm = provider_registry.get("llm")
@@ -45,7 +45,7 @@ async def stream_diagnosis(
 @router.post("/contracts/review")
 async def stream_contract_review(
     body: dict,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-ctr-{uuid.uuid4().hex[:12]}"
     contract_text = body.get("contract_text", "")
@@ -58,7 +58,7 @@ async def stream_contract_review(
 @router.post("/patents/assess")
 async def stream_patent_assess(
     body: dict,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-pat-{uuid.uuid4().hex[:12]}"
     description = body.get("description", "")
@@ -71,7 +71,7 @@ async def stream_patent_assess(
 @router.post("/policies/digest")
 async def stream_policy_digest(
     body: dict,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-pol-{uuid.uuid4().hex[:12]}"
     industry = body.get("industry", "通用")
@@ -84,7 +84,7 @@ async def stream_policy_digest(
 @router.post("/due-diligence/investigate")
 async def stream_due_diligence(
     body: dict,
-    _user=Depends(get_current_user),
+    _ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-dd-{uuid.uuid4().hex[:12]}"
     company_name = body.get("company_name", "")

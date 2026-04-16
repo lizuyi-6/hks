@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -14,6 +14,16 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    plan: Mapped[str] = mapped_column(String(32), default="free")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -21,14 +31,16 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(String(255))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=True)
+    role: Mapped[str] = mapped_column(String(32), default="member")
     business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     business_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
     stage: Mapped[str | None] = mapped_column(String(120), nullable=True)
     applicant_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     applicant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    has_trademark: Mapped[bool | None] = mapped_column(default=False)
-    has_patent: Mapped[bool | None] = mapped_column(default=False)
+    has_trademark: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    has_patent: Mapped[bool | None] = mapped_column(Boolean, default=False)
     ip_focus: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -37,6 +49,7 @@ class JobRecord(Base):
     __tablename__ = "job_records"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=True)
     job_type: Mapped[str] = mapped_column(String(120), index=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -54,6 +67,7 @@ class IpAsset(Base):
     __tablename__ = "ip_assets"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=True)
     owner_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255))
     asset_type: Mapped[str] = mapped_column(String(64))
@@ -96,6 +110,7 @@ class WorkflowInstance(Base):
     __tablename__ = "workflow_instances"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     workflow_type: Mapped[str] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(32), default="pending")
@@ -128,6 +143,7 @@ class ModuleResult(Base):
     __tablename__ = "module_results"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     workflow_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("workflow_instances.id"), nullable=True)
     module_type: Mapped[str] = mapped_column(String(64))

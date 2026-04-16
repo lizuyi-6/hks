@@ -7,14 +7,14 @@ from apps.api.app.adapters.registry import provider_registry
 from apps.api.app.core.database import get_db
 from apps.api.app.core.error_handler import BusinessError, SystemError
 from apps.api.app.schemas.common import PlaceholderResponse
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.jobs import enqueue_job, process_job
 
 router = APIRouter(tags=["modules"])
 
 
 @router.get("/monitoring/status", response_model=PlaceholderResponse)
-def monitoring_status(_user=Depends(get_current_user)):
+def monitoring_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("monitoring").availability()
     return PlaceholderResponse(
         module="monitoring",
@@ -24,10 +24,12 @@ def monitoring_status(_user=Depends(get_current_user)):
 
 
 @router.post("/monitoring/scan")
-def monitoring_scan(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def monitoring_scan(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "monitoring.scan", payload)
         process_job(db, job)
         db.refresh(job)
@@ -45,7 +47,7 @@ def monitoring_scan(body: dict, db: Session = Depends(get_db), user=Depends(get_
 
 
 @router.get("/competitors/status", response_model=PlaceholderResponse)
-def competitors_status(_user=Depends(get_current_user)):
+def competitors_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("competitor").availability()
     return PlaceholderResponse(
         module="competitors",
@@ -55,10 +57,12 @@ def competitors_status(_user=Depends(get_current_user)):
 
 
 @router.post("/competitors/track")
-def competitor_track(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def competitor_track(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "competitor.track", payload)
         process_job(db, job)
         db.refresh(job)
@@ -76,10 +80,12 @@ def competitor_track(body: dict, db: Session = Depends(get_db), user=Depends(get
 
 
 @router.post("/competitors/compare")
-def competitor_compare(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def competitor_compare(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "competitor.compare", payload)
         process_job(db, job)
         db.refresh(job)
@@ -97,7 +103,7 @@ def competitor_compare(body: dict, db: Session = Depends(get_db), user=Depends(g
 
 
 @router.get("/contracts/status", response_model=PlaceholderResponse)
-def contracts_status(_user=Depends(get_current_user)):
+def contracts_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("contractReview").availability()
     return PlaceholderResponse(
         module="contracts",
@@ -107,10 +113,12 @@ def contracts_status(_user=Depends(get_current_user)):
 
 
 @router.post("/contracts/review")
-def contract_review(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def contract_review(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "contract.review", payload)
         process_job(db, job)
         db.refresh(job)
@@ -128,7 +136,7 @@ def contract_review(body: dict, db: Session = Depends(get_db), user=Depends(get_
 
 
 @router.get("/patents/status", response_model=PlaceholderResponse)
-def patents_status(_user=Depends(get_current_user)):
+def patents_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("patentAssist").availability()
     return PlaceholderResponse(
         module="patents",
@@ -138,10 +146,12 @@ def patents_status(_user=Depends(get_current_user)):
 
 
 @router.post("/patents/assess")
-def patent_assess(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def patent_assess(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "patent.assess", payload)
         process_job(db, job)
         db.refresh(job)
@@ -159,7 +169,7 @@ def patent_assess(body: dict, db: Session = Depends(get_db), user=Depends(get_cu
 
 
 @router.get("/policies/status", response_model=PlaceholderResponse)
-def policies_status(_user=Depends(get_current_user)):
+def policies_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("policyDigest").availability()
     return PlaceholderResponse(
         module="policies",
@@ -169,10 +179,12 @@ def policies_status(_user=Depends(get_current_user)):
 
 
 @router.post("/policies/digest")
-def policy_digest(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def policy_digest(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "policy.digest", payload)
         process_job(db, job)
         db.refresh(job)
@@ -190,7 +202,7 @@ def policy_digest(body: dict, db: Session = Depends(get_db), user=Depends(get_cu
 
 
 @router.get("/due-diligence/status", response_model=PlaceholderResponse)
-def due_diligence_status(_user=Depends(get_current_user)):
+def due_diligence_status(_ctx: TenantContext = Depends(get_current_tenant)):
     available, reason = provider_registry.get("dueDiligence").availability()
     return PlaceholderResponse(
         module="due-diligence",
@@ -200,10 +212,12 @@ def due_diligence_status(_user=Depends(get_current_user)):
 
 
 @router.post("/due-diligence/investigate")
-def due_diligence_investigate(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def due_diligence_investigate(body: dict, db: Session = Depends(get_db), ctx: TenantContext = Depends(get_current_tenant)):
     try:
         payload = dict(body)
-        payload["_user_id"] = user.id
+        payload["_user_id"] = ctx.user.id
+        if ctx.tenant:
+            payload["_tenant_id"] = ctx.tenant.id
         job = enqueue_job(db, "due-diligence.investigate", payload)
         process_job(db, job)
         db.refresh(job)
