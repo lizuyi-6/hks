@@ -101,6 +101,16 @@ class LLMPort(BasePortAdapter, ABC):
     ) -> AsyncGenerator[str, None]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def multi_turn_stream(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        system_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        raise NotImplementedError
+
 
 class DocumentRenderPort(BasePortAdapter, ABC):
     @abstractmethod

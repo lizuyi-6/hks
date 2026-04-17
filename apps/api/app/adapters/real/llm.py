@@ -105,6 +105,74 @@ class _LLMClient:
                     except (json.JSONDecodeError, IndexError, KeyError):
                         continue
 
+    async def multi_turn_chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+    ) -> AsyncGenerator[dict, None]:
+        """Stream multi-turn chat with function calling support."""
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        accumulated_tool_calls: dict[int, dict] = {}
+        finish_reason = None
+
+        timeout = httpx.Timeout(90.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[len("data: "):]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        choice = chunk.get("choices", [{}])[0]
+                        delta = choice.get("delta", {})
+                        finish_reason = choice.get("finish_reason") or finish_reason
+
+                        for tc in delta.get("tool_calls", []):
+                            idx = tc.get("index", 0)
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {"name": "", "arguments": ""}
+                            fn = tc.get("function", {})
+                            if fn.get("name"):
+                                accumulated_tool_calls[idx]["name"] = fn["name"]
+                            accumulated_tool_calls[idx]["arguments"] += fn.get("arguments", "")
+
+                        content = delta.get("content")
+                        if content:
+                            yield {"type": "token", "content": content}
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+
+        if finish_reason == "tool_calls" and accumulated_tool_calls:
+            for idx in sorted(accumulated_tool_calls.keys()):
+                tc = accumulated_tool_calls[idx]
+                try:
+                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except json.JSONDecodeError:
+                    args = {}
+                yield {"type": "tool_call", "name": tc["name"], "args": args}
+
+        yield {"type": "done"}
+
 
 def _build_client(settings) -> _LLMClient | None:
     if not settings.llm_api_key:
@@ -510,3 +578,44 @@ class RealLlmAdapter(LLMPort):
                     normalized_payload={"analysis": f"LLM 调用失败: {exc}", "error": True},
                 )
                 yield sse_event("result", envelope.model_dump(by_alias=True))
+
+    async def multi_turn_stream(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        system_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        yield {"type": "meta", "provider": self.provider_name, "mode": self.mode}
+
+        if self._client is None:
+            yield self._keyword_fallback(messages)
+            yield {"type": "done"}
+            return
+
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
+        try:
+            async for event in self._client.multi_turn_chat(full_messages, tools):
+                yield event
+        except Exception as exc:
+            logger.warning("multi_turn_stream LLM failed: %s", exc)
+            yield {"type": "token", "content": "抱歉，AI服务暂时不可用。让我用规则引擎为您处理..."}
+            yield self._keyword_fallback(messages)
+            yield {"type": "done"}
+
+    @staticmethod
+    def _keyword_fallback(messages: list[dict[str, str]]) -> dict:
+        last_user = next(
+            (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+        )
+        if any(kw in last_user for kw in ("商标", "注册", "查重", "品牌")):
+            return {"type": "tool_call", "name": "trademark_check", "args": {
+                "trademark_name": "", "business_description": last_user,
+            }}
+        if any(kw in last_user for kw in ("诊断", "策略", "保护", "IP情况")):
+            return {"type": "tool_call", "name": "ip_diagnosis", "args": {
+                "business_description": last_user,
+            }}
+        if any(kw in last_user for kw in ("资产", "台账", "我的IP")):
+            return {"type": "tool_call", "name": "list_assets", "args": {}}
+        return {"type": "tool_call", "name": "list_assets", "args": {}}

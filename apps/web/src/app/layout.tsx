@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "A1+ IP Coworker",
-  description: "A1+ IP Coworker 全 PRD 脚手架"
+  description: "AI 驱动的知识产权助手，提供商标查重、申请书生成、IP诊断与资产管理服务"
 };
 
 export default function RootLayout({

@@ -39,7 +39,7 @@ export default function RegisterPage() {
     <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(23,32,51,0.12),_transparent_40%),linear-gradient(180deg,#f4ebdc_0%,#fcfaf6_100%)] px-4">
       <SectionCard title="创建账户" eyebrow="Auth" className="w-full max-w-lg">
         <p className="text-sm leading-7 text-slate-600">
-          创建一个演示账户，直接进入全 PRD 骨架工作台。
+          创建账户，即可使用商标查重、IP诊断、申请书生成等功能。
         </p>
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input

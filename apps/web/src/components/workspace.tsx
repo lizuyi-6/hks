@@ -19,6 +19,7 @@ import { Metric, NextStepCard, PipelineIndicator, SectionCard, SourceTag, Status
 import { proxyBaseUrl } from "@/lib/env";
 import { parseErrorResponse, ApplicationError, getErrorDisplayInfo } from "@/lib/errors";
 import { fetchSSE } from "@/lib/sse";
+import { FileUpload } from "@/components/file-upload";
 
 type ProviderHealth = {
   providers: Array<{
@@ -167,10 +168,10 @@ export function DashboardPanel() {
       <SectionCard
         title="A1+ IP 主流程"
         eyebrow="Overview"
-        actions={<StatusBadge label="Web 优先，多端预留" tone="info" />}
+        actions={<StatusBadge label="已上线" tone="success" />}
       >
         <div className="grid gap-4 md:grid-cols-3">
-          <Metric label="模块数量" value={`${modules.length}`} detail="覆盖全 PRD 页面壳与能力入口" />
+          <Metric label="模块数量" value={`${modules.length}`} detail="覆盖商标、专利、合同等核心业务" />
           <Metric label="核心流程" value={`${coreWorkflow.length} 步`} detail="诊断到台账自动写入完整打通" />
           <Metric label="法律边界" value="辅助准备" detail="不代替官方申报，提交由用户完成" />
         </div>
@@ -1267,5 +1268,136 @@ export function ReminderPanel() {
         )}
       </div>
     </SectionCard>
+  );
+}
+
+type PatentResult = {
+  recommended_type: string;
+  novelty_assessment: string;
+  feasibility: string;
+  key_points: string[];
+  materials_needed: string[];
+  estimated_timeline: string;
+  cost_estimate: string;
+  risks: string[];
+};
+
+const patentTypeLabel: Record<string, string> = {
+  invention: "发明专利",
+  utility_model: "实用新型",
+  design: "外观设计",
+  software_copyright: "软件著作权",
+};
+
+export function PatentAssessWorkspace() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<Envelope<PatentResult> | null>(null);
+  const [streamingText, setStreamingText] = useState("");
+  const [description, setDescription] = useState("");
+
+  async function handleSubmit(formData: FormData) {
+    setLoading(true);
+    setError(null);
+    setStreamingText("");
+    try {
+      await fetchSSE<Envelope<PatentResult>>(
+        `${proxyBaseUrl}/stream/patents/assess`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: String(formData.get("description") ?? "") })
+        },
+        {
+          onToken: (token) => setStreamingText(prev => prev + token),
+          onResult: (envelope) => { setResult(envelope); setStreamingText(""); },
+          onError: (msg) => { setError(msg); setStreamingText(""); }
+        }
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "评估失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <SectionCard title="专利/软著评估" eyebrow="Patent & Copyright">
+        <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
+          <FileUpload onTextExtracted={setDescription} label="上传技术文档，自动提取描述" />
+          <textarea
+            name="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="描述你的技术方案、产品功能或创新点..."
+            rows={6}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring"
+            required
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                AI 评估中...
+              </>
+            ) : "执行评估"}
+          </button>
+          {streamingText && (
+            <div className="rounded-2xl border border-rust/20 bg-rust/5 p-4">
+              <p className="leading-7 text-slate-700 whitespace-pre-wrap">{streamingText}</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-slate-400">
+                <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rust" />
+                正在生成...
+              </div>
+            </div>
+          )}
+          {error && <ErrorDisplay error={error} />}
+        </form>
+      </SectionCard>
+
+      {result && (
+        <SectionCard
+          title="评估结果"
+          eyebrow="Result"
+          actions={<SourceTag mode={result.mode} provider={result.provider} />}
+        >
+          <div className="flex items-center gap-3">
+            <StatusBadge label={`推荐类型: ${patentTypeLabel[result.normalizedPayload.recommended_type] || result.normalizedPayload.recommended_type}`} tone="info" />
+            <StatusBadge label={`可行性: ${result.normalizedPayload.feasibility}`} tone={result.normalizedPayload.feasibility === "high" ? "success" : "warning"} />
+          </div>
+          <p className="mt-4 leading-7 text-slate-700">{result.normalizedPayload.novelty_assessment}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700">技术要点</p>
+              <ul className="mt-3 space-y-1 text-sm text-slate-600">
+                {(result.normalizedPayload.key_points ?? []).map((item, index) => <li key={index}>• {item}</li>)}
+              </ul>
+            </div>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700">需要材料</p>
+              <ul className="mt-3 space-y-1 text-sm text-slate-600">
+                {(result.normalizedPayload.materials_needed ?? []).map((item, index) => <li key={index}>• {item}</li>)}
+              </ul>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700">预计时间</p>
+              <p className="mt-2 text-sm text-slate-600">{result.normalizedPayload.estimated_timeline}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700">费用估算</p>
+              <p className="mt-2 text-sm text-slate-600">{result.normalizedPayload.cost_estimate}</p>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-900">{result.disclaimer}</div>
+        </SectionCard>
+      )}
+    </div>
   );
 }

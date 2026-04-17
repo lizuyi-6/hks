@@ -235,6 +235,54 @@ class MockLlmAdapter(LLMPort):
             yield sse_event("token", {"content": chunk})
         yield sse_event("result", envelope.model_dump(by_alias=True))
 
+    async def multi_turn_stream(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        system_prompt: str,
+        trace_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        yield {"type": "meta", "provider": self.provider_name, "mode": self.mode}
+
+        last_user = next(
+            (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+        )
+
+        if any(kw in last_user for kw in ("商标", "注册", "查重", "品牌")):
+            yield {"type": "tool_call", "name": "trademark_check", "args": {
+                "trademark_name": "Mock商标", "business_description": last_user, "categories": ["42"],
+            }}
+        elif any(kw in last_user for kw in ("诊断", "策略", "保护", "IP情况")):
+            yield {"type": "tool_call", "name": "ip_diagnosis", "args": {
+                "business_description": last_user,
+            }}
+        elif any(kw in last_user for kw in ("资产", "台账", "我的IP")):
+            yield {"type": "tool_call", "name": "list_assets", "args": {}}
+        elif any(kw in last_user for kw in ("申请书", "生成申请")):
+            yield {"type": "tool_call", "name": "generate_application", "args": {
+                "trademark_name": "Mock商标", "applicant_name": "Mock用户",
+                "categories": ["42"], "risk_level": "yellow",
+            }}
+        elif any(kw in last_user for kw in ("合同", "审查")):
+            yield {"type": "tool_call", "name": "contract_review", "args": {
+                "contract_text": last_user,
+            }}
+        elif any(kw in last_user for kw in ("专利", "技术")):
+            yield {"type": "tool_call", "name": "patent_assess", "args": {
+                "description": last_user,
+            }}
+        elif any(kw in last_user for kw in ("政策", "补贴", "扶持")):
+            yield {"type": "tool_call", "name": "policy_digest", "args": {
+                "industry": "软件",
+            }}
+        else:
+            mock_reply = "（Mock）您好！我是A1+ IP Coworker。请告诉我您的知识产权需求，我可以帮您做商标查重、IP诊断、资产查询等。"
+            for chunk in _split_chunks(mock_reply):
+                await asyncio.sleep(0.03)
+                yield {"type": "token", "content": chunk}
+
+        yield {"type": "done"}
+
 
 def _split_chunks(text: str, size: int = 4) -> list[str]:
     """Split text into chunks for simulated streaming."""
