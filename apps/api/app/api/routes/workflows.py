@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.database import get_db
@@ -8,6 +9,7 @@ from apps.api.app.services.dependencies import TenantContext, get_current_tenant
 from apps.api.app.services.workflow_engine import (
     advance_workflow,
     create_workflow,
+    fail_workflow_step,
     get_user_workflows,
     get_workflow_detail,
 )
@@ -111,3 +113,53 @@ def advance(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return _workflow_to_dict(instance)
+
+
+class ApproveStepRequest(BaseModel):
+    step_id: str
+    approved: bool
+    note: str | None = None
+
+
+@router.post("/{workflow_id}/approve-step")
+def approve_workflow_step(
+    workflow_id: str,
+    body: ApproveStepRequest,
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_current_tenant),
+):
+    from apps.api.app.db.models import WorkflowStep, WorkflowInstance
+
+    step = (
+        db.query(WorkflowStep)
+        .filter(
+            WorkflowStep.id == body.step_id,
+            WorkflowStep.workflow_id == workflow_id,
+            WorkflowStep.status == "awaiting_review",
+        )
+        .first()
+    )
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found or not awaiting review")
+
+    instance = db.query(WorkflowInstance).filter(
+        WorkflowInstance.id == workflow_id
+    ).first()
+    if not instance:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if ctx.tenant and instance.tenant_id != ctx.tenant.id:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if body.approved:
+        try:
+            instance = advance_workflow(db, workflow_id, step_output={})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _workflow_to_dict(instance)
+    else:
+        try:
+            instance = fail_workflow_step(db, workflow_id, error_message=body.note or "用户拒绝")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _workflow_to_dict(instance)

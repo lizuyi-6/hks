@@ -15,6 +15,8 @@ from apps.api.app.schemas.trademark import (
     ApplicationDraftRequest,
     ApplicationDraftResult,
 )
+from apps.api.app.services import event_types
+from apps.api.app.services.event_bus import emit_event
 
 
 def _save_module_result(db: Session, job: JobRecord, module_type: str, result_data: dict) -> None:
@@ -230,15 +232,109 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
             job.result = result_dict
             _save_module_result(db, job, "due-diligence", result_dict)
 
+        elif job.job_type == "asset.expiry_check":
+            now = utcnow()
+            threshold = now + timedelta(days=90)
+            expiring_assets = (
+                db.query(IpAsset)
+                .filter(
+                    IpAsset.expires_at <= threshold,
+                    IpAsset.expires_at >= now,
+                )
+                .all()
+            )
+            for asset in expiring_assets:
+                days_left = (asset.expires_at - now).days
+                emit_event(
+                    db,
+                    event_type=event_types.ASSET_EXPIRING_SOON,
+                    user_id=asset.owner_id,
+                    tenant_id=asset.tenant_id,
+                    source_entity_type="asset",
+                    source_entity_id=asset.id,
+                    payload={
+                        "asset_id": asset.id,
+                        "asset_name": asset.name,
+                        "days_until_expiry": days_left,
+                    },
+                )
+            job.result = {"checked": len(expiring_assets)}
+
         else:
             raise ValueError(f"Unknown job type: {job.job_type}")
 
         job.status = "completed"
         job.error_message = None
+
+        _user_id = (job.payload or {}).get("_user_id") if job.payload else None
+        emit_event(
+            db,
+            event_type=event_types.JOB_COMPLETED,
+            user_id=_user_id,
+            tenant_id=job.tenant_id,
+            source_entity_type="job",
+            source_entity_id=job.id,
+            payload={"job_type": job.job_type, "job_id": job.id},
+        )
+
+        result_dict = job.result or {}
+        normalized = result_dict.get("normalizedPayload", result_dict)
+
+        if job.job_type == "monitoring.scan":
+            alerts = normalized.get("alerts", [])
+            if alerts:
+                emit_event(
+                    db,
+                    event_type=event_types.MONITORING_ALERT,
+                    user_id=_user_id,
+                    tenant_id=job.tenant_id,
+                    source_entity_type="job",
+                    source_entity_id=job.id,
+                    payload={
+                        "alert_count": len(alerts),
+                        "high_count": sum(1 for a in alerts if a.get("severity") == "high"),
+                        "job_id": job.id,
+                    },
+                )
+
+        elif job.job_type == "competitor.track":
+            emit_event(
+                db,
+                event_type=event_types.COMPETITOR_CHANGE,
+                user_id=_user_id,
+                tenant_id=job.tenant_id,
+                source_entity_type="job",
+                source_entity_id=job.id,
+                payload={"job_id": job.id},
+            )
+
+        elif job.job_type == "policy.digest":
+            emit_event(
+                db,
+                event_type=event_types.POLICY_DIGEST_READY,
+                user_id=_user_id,
+                tenant_id=job.tenant_id,
+                source_entity_type="job",
+                source_entity_id=job.id,
+                payload={"job_id": job.id},
+            )
+
         db.commit()
     except Exception as exc:  # noqa: BLE001
         job.error_message = str(exc)
         job.status = "dead_letter" if job.attempts >= job.max_attempts else "failed"
+
+        _user_id = (job.payload or {}).get("_user_id") if job.payload else None
+        emit_event(
+            db,
+            event_type=event_types.JOB_FAILED,
+            user_id=_user_id,
+            tenant_id=job.tenant_id,
+            source_entity_type="job",
+            source_entity_id=job.id,
+            payload={"job_type": job.job_type, "error": str(exc)},
+        )
+
         reminder = db.query(ReminderTask).filter(ReminderTask.job_id == job.id).first()
         if reminder:
             reminder.status = "dead_letter" if job.status == "dead_letter" else "failed"

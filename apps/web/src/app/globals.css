@@ -46,3 +46,152 @@ textarea::placeholder {
   color: #94a3b8 !important;
   opacity: 1 !important;
 }
+
+/* 自定义滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(160, 74, 42, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(160, 74, 42, 0.35);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(160, 74, 42, 0.2) transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(160, 74, 42, 0.35) transparent;
+}
+
+/* 页面过渡动画 */
+@layer utilities {
+  .page-enter {
+    animation: fadeUp 0.4s ease-out both;
+  }
+
+  .page-enter-active {
+    animation: none;
+  }
+
+  /* 骨架屏动画 */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(160, 74, 42, 0.06) 25%,
+      rgba(160, 74, 42, 0.12) 50%,
+      rgba(160, 74, 42, 0.06) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* 列表项交错动画 */
+  .stagger-list > *:nth-child(1) { animation: fadeUp 0.4s ease-out 0.05s both; }
+  .stagger-list > *:nth-child(2) { animation: fadeUp 0.4s ease-out 0.1s both; }
+  .stagger-list > *:nth-child(3) { animation: fadeUp 0.4s ease-out 0.15s both; }
+  .stagger-list > *:nth-child(4) { animation: fadeUp 0.4s ease-out 0.2s both; }
+  .stagger-list > *:nth-child(5) { animation: fadeUp 0.4s ease-out 0.25s both; }
+  .stagger-list > *:nth-child(6) { animation: fadeUp 0.4s ease-out 0.3s both; }
+  .stagger-list > *:nth-child(7) { animation: fadeUp 0.4s ease-out 0.35s both; }
+  .stagger-list > *:nth-child(8) { animation: fadeUp 0.4s ease-out 0.4s both; }
+  .stagger-list > *:nth-child(n+9) { animation: fadeUp 0.4s ease-out 0.45s both; }
+
+  /* 卡片悬停效果 */
+  .card-hover {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  }
+
+  /* 按钮点击反馈 */
+  .btn-press {
+    transition: transform 0.1s ease, opacity 0.1s ease;
+  }
+
+  .btn-press:active {
+    transform: scale(0.97);
+    opacity: 0.9;
+  }
+
+  /* 链接下划线动画 */
+  .link-underline {
+    position: relative;
+  }
+
+  .link-underline::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 2px;
+    background: currentColor;
+    transition: width 0.2s ease;
+  }
+
+  .link-underline:hover::after {
+    width: 100%;
+  }
+
+  /* 淡入遮罩 */
+  .fade-mask {
+    mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  }
+
+  /* 脉冲点动画 */
+  .pulse-dot {
+    position: relative;
+  }
+
+  .pulse-dot::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.3;
+    animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes ping {
+    75%, 100% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
+
+  /* 成功状态动画 */
+  .success-check {
+    animation: scaleIn 0.3s ease-out, fadeIn 0.3s ease-out;
+  }
+
+  /* 错误抖动 */
+  .error-shake {
+    animation: shake 0.4s ease-out;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+}

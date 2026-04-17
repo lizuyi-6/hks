@@ -20,7 +20,7 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_18px_80px_rgba(15,23,42,0.08)] backdrop-blur",
+        "rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_18px_80px_rgba(15,23,42,0.08)] backdrop-blur animate-fade-up card-hover",
         className,
       )}
     >
@@ -171,11 +171,11 @@ export function NextStepCard({
   onClose?: () => void;
 }) {
   return (
-    <div className="relative rounded-2xl border border-blue-200 bg-blue-50 p-5">
+    <div className="relative rounded-2xl border border-blue-200 bg-blue-50 p-5 animate-slide-in-up">
       {onClose ? (
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:text-slate-600"
+          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:text-slate-600 transition-colors"
         >
           ×
         </button>
@@ -187,7 +187,7 @@ export function NextStepCard({
       <p className="mt-1.5 text-sm text-slate-600">{description}</p>
       <Link
         href={action.href}
-        className="mt-3 inline-block rounded-full bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+        className="mt-3 inline-block rounded-full bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors btn-press"
       >
         {action.label}
       </Link>

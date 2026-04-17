@@ -623,6 +623,82 @@ function getMockResponse(pathname: string, method: string, searchParams?: URLSea
     });
   }
 
+  // ── Notifications ──────────────────────────────────────────────────────
+  if (pathname === "notifications" && method === "GET") {
+    return NextResponse.json([
+      {
+        id: "mock-notif-1",
+        category: "monitoring",
+        priority: "high",
+        title: "发现侵权风险，请关注",
+        body: "共发现 3 条风险，其中高风险 1 条。请前往监控模块查看详情。",
+        actionUrl: "/inbox",
+        actionLabel: "查看详情",
+        readAt: null,
+        createdAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      },
+      {
+        id: "mock-notif-2",
+        category: "workflow",
+        priority: "high",
+        title: "「申请书生成」完成，等待您确认",
+        body: "请前往工作台审批此步骤的生成结果。",
+        actionUrl: "/inbox",
+        actionLabel: "前往审批",
+        readAt: null,
+        createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+      },
+    ]);
+  }
+
+  if (pathname === "notifications/count" && method === "GET") {
+    return NextResponse.json({ unread: 2 });
+  }
+
+  if (pathname === "notifications/read-all" && method === "POST") {
+    return NextResponse.json({ marked: 2 });
+  }
+
+  if (pathname.match(/^notifications\/[^/]+\/read$/) && method === "POST") {
+    return NextResponse.json({ ok: true });
+  }
+
+  if (pathname.match(/^notifications\/[^/]+$/) && method === "DELETE") {
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── Automation Rules ────────────────────────────────────────────────────
+  if (pathname === "automation/rules" && method === "GET") {
+    return NextResponse.json([
+      { id: "rule-1", ruleKey: "sys.weekly_asset_scan", enabled: true, triggerType: "cron", triggerConfig: { cron: "0 9 * * 1" }, actionType: "enqueue_job", actionConfig: {}, description: "每周一自动扫描全部已登记资产的侵权情况", lastFiredAt: null, createdAt: new Date().toISOString() },
+      { id: "rule-2", ruleKey: "sys.daily_expiry_check", enabled: true, triggerType: "cron", triggerConfig: { cron: "0 8 * * *" }, actionType: "enqueue_job", actionConfig: {}, description: "每日检查 IP 资产到期情况", lastFiredAt: null, createdAt: new Date().toISOString() },
+      { id: "rule-3", ruleKey: "sys.workflow_auto_advance", enabled: true, triggerType: "event", triggerConfig: { event_type: "job.completed" }, actionType: "advance_workflow", actionConfig: {}, description: "Job 完成后自动推进工作流", lastFiredAt: null, createdAt: new Date().toISOString() },
+      { id: "rule-4", ruleKey: "sys.monitoring_alert_notify", enabled: true, triggerType: "event", triggerConfig: { event_type: "monitoring.alert" }, actionType: "create_notification", actionConfig: {}, description: "侵权监控告警 → 站内通知", lastFiredAt: null, createdAt: new Date().toISOString() },
+      { id: "rule-5", ruleKey: "sys.competitor_change_notify", enabled: true, triggerType: "event", triggerConfig: { event_type: "competitor.change" }, actionType: "create_notification", actionConfig: {}, description: "竞争对手商标动态 → 站内通知", lastFiredAt: null, createdAt: new Date().toISOString() },
+      { id: "rule-6", ruleKey: "sys.policy_digest_notify", enabled: false, triggerType: "event", triggerConfig: { event_type: "policy.digest_ready" }, actionType: "create_notification", actionConfig: {}, description: "政策速递完成 → 站内通知", lastFiredAt: null, createdAt: new Date().toISOString() },
+    ]);
+  }
+
+  if (pathname.match(/^automation\/rules\/[^/]+$/) && method === "PUT") {
+    return NextResponse.json({ ok: true });
+  }
+
+  if (pathname.match(/^automation\/rules\/[^/]+\/fire$/) && method === "POST") {
+    return NextResponse.json({ fired: true });
+  }
+
+  // ── Jobs list ────────────────────────────────────────────────────────────
+  if (pathname === "jobs" && method === "GET") {
+    return NextResponse.json([
+      { id: "job-mock-1", jobType: "monitoring.scan", status: "processing", createdAt: new Date().toISOString() },
+    ]);
+  }
+
+  // ── Workflows approve-step ──────────────────────────────────────────────
+  if (pathname.match(/^workflows\/[^/]+\/approve-step$/) && method === "POST") {
+    return NextResponse.json({ ok: true });
+  }
+
   const mock = mockResponses[pathname];
   if (!mock) {
     return null;

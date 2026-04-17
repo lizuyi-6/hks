@@ -64,6 +64,20 @@ services:
       redis:
         condition: service_healthy
 
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/a1plus
+      REDIS_URL: redis://redis:6379/0
+      A1PLUS_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+
   web:
     build:
       context: .

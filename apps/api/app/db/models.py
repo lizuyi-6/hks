@@ -7,6 +7,8 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
+from sqlalchemy import Column
+
 from apps.api.app.core.database import Base
 
 
@@ -150,3 +152,55 @@ class ModuleResult(Base):
     job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("job_records.id"), nullable=True)
     result_data: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SystemEvent(Base):
+    __tablename__ = "system_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    source_entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AutomationRule(Base):
+    __tablename__ = "automation_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    rule_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    trigger_type: Mapped[str] = mapped_column(String(32))
+    trigger_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    condition_expr: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(64))
+    action_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    category: Mapped[str] = mapped_column(String(64))
+    priority: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    action_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

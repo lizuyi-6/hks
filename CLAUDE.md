@@ -63,7 +63,7 @@ npm run test             # web + api tests
 - Pydantic models use camelCase aliasing (`to_camel` alias generator) so Python snake_case fields serialize as camelCase JSON
 - Config: `app/core/config.py` reads `.env` via pydantic-settings; defaults to SQLite for dev
 - Routes in `app/api/routes/` — 13 route modules (analytics, assets, auth, diagnosis, jobs, module_results, placeholders, reminders, stream, suggestions, system, trademarks, workflows)
-- SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence
+- SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence. The LLM adapter (`adapters/real/llm.py`) exposes async `*_stream()` variants (e.g. `diagnose_stream()`, `analyze_text_stream()`) that yield SSE tokens; non-streaming callers use the sync counterparts
 - Error handling: `app/core/error_handler.py` defines a typed hierarchy (`ValidationError`, `NotFoundError`, `AuthError`, `BusinessError`, `SystemError`) with structured JSON responses
 - Database models (`app/db/models.py`): `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult` — UUID string PKs, JSON columns
 - Auth: PBKDF2-SHA256 password hashing, HS256 JWT tokens (`app/core/security.py`)
@@ -104,6 +104,8 @@ npm run test             # web + api tests
 - **Legal boundary**: All user-facing outputs must include the disclaimer from `packages/config` (`legalBoundaryNotice`)
 - **Unified errors**: Backend raises typed `APIError` subclasses; frontend parses them into `ApplicationError` via `lib/errors.ts` — both share the same type hierarchy
 - **No global state**: Frontend components use local `useState`/`useEffect` with direct `fetch()` calls to the BFF
+- **LLM fallback pattern**: Every real adapter that calls LLM wraps the call in try/except and falls back to a deterministic rules-engine result; callers never see an LLM error, only degraded output with `mode: "rules"` in the envelope
+- **Search provider chain**: Monitoring adapter tries Bing API → DuckDuckGo (with custom SSL context for compatibility) → static knowledge-base rules. Each layer only activates when the previous one is unconfigured or fails
 
 ## Environment Variables
 
@@ -122,7 +124,7 @@ Key vars beyond the obvious DB/Redis URLs:
 | `GENERATED_DIR` | Where rendered documents (PDF/DOCX) are stored; defaults to `apps/api/.generated/` |
 | `KNOWLEDGE_BASE_DIR` | Path to knowledge base files |
 | `WORKER_POLL_INTERVAL` | Worker polling interval in seconds (default 5) |
-| `LLM_PROVIDER` | LLM backend name (e.g. `minimax`) |
+| `LLM_PROVIDER` | LLM backend: `minimax`, `dashscope`, `deepseek`, or any OpenAI-compatible provider via custom `LLM_BASE_URL` |
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | LLM connection settings |
 | `TIANAYANCHA_API_KEY` | Tianyancha enterprise-lookup API key |
 | `BING_SEARCH_API_KEY` / `BING_SEARCH_ENDPOINT` | Bing web-search API for monitoring |

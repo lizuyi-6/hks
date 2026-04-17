@@ -12,6 +12,8 @@ from apps.api.app.db.models import (
     WorkflowInstance,
     WorkflowStep,
 )
+from apps.api.app.services import event_types
+from apps.api.app.services.event_bus import emit_event
 from apps.api.app.services.jobs import enqueue_job
 
 
@@ -23,11 +25,41 @@ WORKFLOW_TEMPLATES = {
     "trademark-registration": {
         "name": "商标注册全流程",
         "steps": [
-            {"step_type": "diagnosis", "job_type": "diagnosis.report", "name": "IP 诊断"},
-            {"step_type": "trademark-check", "job_type": None, "name": "商标查重"},
-            {"step_type": "application", "job_type": "trademark.application", "name": "申请书生成"},
-            {"step_type": "submit-guide", "job_type": None, "name": "提交引导"},
-            {"step_type": "ledger", "job_type": None, "name": "入台账"},
+            {
+                "step_type": "diagnosis",
+                "job_type": "diagnosis.report",
+                "name": "IP 诊断",
+                "requires_user_review": False,
+                "auto_enqueue": True,
+            },
+            {
+                "step_type": "trademark-check",
+                "job_type": "trademark.check",
+                "name": "商标查重",
+                "requires_user_review": False,
+                "auto_enqueue": True,
+            },
+            {
+                "step_type": "application",
+                "job_type": "trademark.application",
+                "name": "申请书生成",
+                "requires_user_review": True,
+                "auto_enqueue": True,
+            },
+            {
+                "step_type": "submit-guide",
+                "job_type": None,
+                "name": "提交引导",
+                "requires_user_review": True,
+                "auto_enqueue": False,
+            },
+            {
+                "step_type": "ledger",
+                "job_type": None,
+                "name": "入台账",
+                "requires_user_review": False,
+                "auto_enqueue": False,
+            },
         ],
     }
 }
@@ -122,6 +154,19 @@ def advance_workflow(
     current_step.status = "completed"
     current_step.output_data = step_output or {}
 
+    emit_event(
+        db,
+        event_type=event_types.WORKFLOW_STEP_COMPLETED,
+        source_entity_type="workflow_step",
+        source_entity_id=current_step.id,
+        payload={
+            "workflow_id": instance.id,
+            "step_type": current_step.step_type,
+            "step_index": instance.current_step_index,
+            "job_id": current_step.job_id,
+        },
+    )
+
     if step_output:
         instance.context = _deep_merge(instance.context, step_output)
 
@@ -140,6 +185,13 @@ def advance_workflow(
                 next_step.job_id = job.id
     else:
         instance.status = "completed"
+        emit_event(
+            db,
+            event_type=event_types.WORKFLOW_COMPLETED,
+            source_entity_type="workflow",
+            source_entity_id=instance.id,
+            payload={"workflow_type": instance.workflow_type, "workflow_id": instance.id},
+        )
 
     db.commit()
     db.refresh(instance)
@@ -169,6 +221,13 @@ def fail_workflow_step(
         current_step.output_data = {"error": error_message}
 
     instance.status = "failed"
+    emit_event(
+        db,
+        event_type=event_types.WORKFLOW_FAILED,
+        source_entity_type="workflow_step",
+        source_entity_id=instance.id,
+        payload={"workflow_id": instance.id, "error": error_message},
+    )
     db.commit()
     db.refresh(instance)
     return instance
@@ -327,3 +386,81 @@ def get_workflow_detail(db: Session, workflow_id: str) -> WorkflowInstance:
     if instance is None:
         raise ValueError("Workflow not found")
     return instance
+
+
+def auto_advance_workflow(
+    db: Session,
+    completed_job_id: str,
+) -> WorkflowInstance | None:
+    from apps.api.app.db.models import JobRecord
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    step = (
+        db.query(WorkflowStep)
+        .filter(
+            WorkflowStep.job_id == completed_job_id,
+            WorkflowStep.status == "running",
+        )
+        .first()
+    )
+    if not step:
+        return None
+
+    instance = db.query(WorkflowInstance).filter(
+        WorkflowInstance.id == step.workflow_id
+    ).first()
+    if not instance:
+        return None
+
+    template = WORKFLOW_TEMPLATES.get(instance.workflow_type, {})
+    steps_def = template.get("steps", [])
+    step_def = next(
+        (s for s in steps_def if s["step_type"] == step.step_type),
+        None,
+    )
+    requires_review = step_def.get("requires_user_review", False) if step_def else False
+
+    if requires_review:
+        step.status = "awaiting_review"
+
+        emit_event(
+            db,
+            event_type=event_types.WORKFLOW_STEP_AWAITING,
+            source_entity_type="workflow_step",
+            source_entity_id=step.id,
+            payload={
+                "workflow_id": instance.id,
+                "step_type": step.step_type,
+                "step_name": step_def.get("name", step.step_type) if step_def else step.step_type,
+            },
+        )
+
+        try:
+            from apps.api.app.services.notifications import create_notification
+            user_id = (instance.context or {}).get("user_id") or instance.user_id
+            if user_id:
+                step_name = step_def.get("name", step.step_type) if step_def else step.step_type
+                create_notification(
+                    db,
+                    user_id=user_id,
+                    tenant_id=getattr(instance, "tenant_id", None),
+                    category="workflow",
+                    priority="high",
+                    title=f"「{step_name}」完成，等待您确认",
+                    body="请前往工作台审批此步骤的生成结果。",
+                    action_url="/inbox",
+                    action_label="前往审批",
+                    source_entity_type="workflow_step",
+                    source_entity_id=step.id,
+                )
+        except Exception:
+            _logger.exception("create_notification failed in auto_advance_workflow")
+
+        db.commit()
+        return instance
+
+    else:
+        job = db.query(JobRecord).filter(JobRecord.id == completed_job_id).first()
+        step_output = (job.result or {}) if job else {}
+        return advance_workflow(db, instance.id, step_output=step_output)

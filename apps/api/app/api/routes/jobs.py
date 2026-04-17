@@ -1,7 +1,7 @@
 import logging
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.database import SessionLocal, get_db
@@ -13,6 +13,33 @@ from apps.api.app.services.jobs import get_job_or_error, process_job, rerun_job
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _job_to_dict(j: JobRecord) -> dict:
+    return {
+        "id": j.id,
+        "jobType": j.job_type,
+        "status": j.status,
+        "createdAt": j.created_at.isoformat(),
+        "tenantId": j.tenant_id,
+    }
+
+
+@router.get("")
+def list_jobs(
+    status: str | None = Query(None),
+    limit: int = Query(50, le=100),
+    db: Session = Depends(get_db),
+    ctx: TenantContext = Depends(get_current_tenant),
+):
+    q = db.query(JobRecord)
+    if ctx.tenant:
+        q = q.filter(JobRecord.tenant_id == ctx.tenant.id)
+    if status:
+        statuses = [s.strip() for s in status.split(",")]
+        q = q.filter(JobRecord.status.in_(statuses))
+    jobs = q.order_by(JobRecord.created_at.desc()).limit(limit).all()
+    return [_job_to_dict(j) for j in jobs]
 
 
 def _process_in_background(job_id: str) -> None:

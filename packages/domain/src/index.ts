@@ -144,7 +144,9 @@ export type ModuleDefinition = {
     | "contracts"
     | "patents"
     | "policies"
-    | "due-diligence";
+    | "due-diligence"
+    | "inbox"
+    | "automation";
   title: string;
   description: string;
   href: string;
@@ -198,6 +200,44 @@ export type Suggestion = {
   priority: "high" | "medium" | "low";
 };
 
+export type NotificationCategory =
+  | "workflow"
+  | "monitoring"
+  | "policy"
+  | "competitor"
+  | "reminder"
+  | "system";
+
+export type NotificationPriority = "high" | "medium" | "low";
+
+export interface AppNotification {
+  id: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  title: string;
+  body?: string;
+  actionUrl?: string;
+  actionLabel?: string;
+  sourceEntityType?: string;
+  sourceEntityId?: string;
+  readAt?: string;
+  dismissedAt?: string;
+  createdAt: string;
+}
+
+export interface AutomationRule {
+  id: string;
+  ruleKey: string;
+  enabled: boolean;
+  triggerType: "cron" | "event";
+  triggerConfig: Record<string, unknown>;
+  actionType: string;
+  actionConfig: Record<string, unknown>;
+  description?: string;
+  lastFiredAt?: string;
+  createdAt: string;
+}
+
 export const coreWorkflow = [
   "注册 / 登录",
   "IP 诊断",
@@ -210,23 +250,30 @@ export const coreWorkflow = [
 
 export const modules: ModuleDefinition[] = [
   {
+    key: "inbox",
+    title: "收件箱",
+    description: "查看任务状态、待审批事项、提醒通知和巡检结果。",
+    href: "/inbox",
+    status: "core"
+  },
+  {
     key: "dashboard",
     title: "工作台",
-    description: "查看核心指标、流程入口与 provider 健康状态。",
+    description: "核心指标、流程入口、provider 状态与自动化配置。",
     href: "/dashboard",
     status: "core"
   },
   {
     key: "diagnosis",
-    title: "IP 诊断",
-    description: "根据业务描述生成保护建议，并引导进入后续模块。",
+    title: "IP 规划",
+    description: "IP 诊断、专利/软著评估与保护策略建议。",
     href: "/diagnosis",
     status: "core"
   },
   {
     key: "trademark",
     title: "商标工作流",
-    description: "完成查重、风险判断、申请书生成与提交引导。",
+    description: "查重、风险判断、申请书生成与提交引导。",
     href: "/trademark/check",
     status: "core"
   },
@@ -238,50 +285,29 @@ export const modules: ModuleDefinition[] = [
     status: "core"
   },
   {
-    key: "reminders",
-    title: "提醒中心",
-    description: "查看到期提醒、任务状态与重试入口。",
-    href: "/reminders",
-    status: "core"
-  },
-  {
     key: "monitoring",
-    title: "侵权监控雷达",
-    description: "基于公开搜索的商标侵权监控与告警。",
+    title: "IP 监控",
+    description: "侵权监控、竞品追踪与风险告警。",
     href: "/monitoring",
     status: "core"
   },
   {
-    key: "competitors",
-    title: "竞争对手追踪",
-    description: "跟踪竞品 IP 动态，评估竞争态势。",
-    href: "/competitors",
-    status: "core"
-  },
-  {
     key: "contracts",
-    title: "合同 IP 条款审查",
-    description: "AI 辅助审查合同中的知识产权相关条款。",
+    title: "合同审查",
+    description: "AI 辅助审查合同中的知识产权条款。",
     href: "/contracts",
     status: "core"
   },
   {
-    key: "patents",
-    title: "专利 / 软著辅助",
-    description: "评估技术方案，推荐专利或软著保护策略。",
-    href: "/patents",
-    status: "core"
-  },
-  {
     key: "policies",
-    title: "行业政策摘要",
-    description: "AI 整理行业知识产权政策与合规提醒。",
+    title: "政策速递",
+    description: "行业知识产权政策与合规提醒。",
     href: "/policies",
     status: "core"
   },
   {
     key: "due-diligence",
-    title: "融资 IP 尽调",
+    title: "融资尽调",
     description: "汇总目标公司 IP 资产、风险与估值因素。",
     href: "/due-diligence",
     status: "core"
