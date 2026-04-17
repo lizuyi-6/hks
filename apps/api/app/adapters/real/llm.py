@@ -397,9 +397,13 @@ class RealLlmAdapter(LLMPort):
             )
             yield sse_event("result", envelope.model_dump(by_alias=True))
         except Exception as exc:
-            logger.warning("LLM diagnose_stream failed, falling back to rules: %s", exc)
-            envelope = self._diagnose_rules(payload, knowledge, trace_id)
-            yield sse_event("result", envelope.model_dump(by_alias=True))
+            logger.warning("LLM diagnose_stream failed, falling back to sync: %s", exc)
+            try:
+                envelope = self.diagnose(payload, knowledge, trace_id)
+                yield sse_event("result", envelope.model_dump(by_alias=True))
+            except Exception:
+                envelope = self._diagnose_rules(payload, knowledge, trace_id)
+                yield sse_event("result", envelope.model_dump(by_alias=True))
 
     async def summarize_application_stream(
         self,
@@ -440,9 +444,13 @@ class RealLlmAdapter(LLMPort):
             )
             yield sse_event("result", envelope.model_dump(by_alias=True))
         except Exception as exc:
-            logger.warning("LLM summarize_stream failed, falling back to rules: %s", exc)
-            envelope = self._summarize_application_rules(payload, trace_id)
-            yield sse_event("result", envelope.model_dump(by_alias=True))
+            logger.warning("LLM summarize_stream failed, falling back to sync: %s", exc)
+            try:
+                envelope = self.summarize_application(payload, trace_id)
+                yield sse_event("result", envelope.model_dump(by_alias=True))
+            except Exception:
+                envelope = self._summarize_application_rules(payload, trace_id)
+                yield sse_event("result", envelope.model_dump(by_alias=True))
 
     async def analyze_text_stream(
         self,
@@ -487,13 +495,18 @@ class RealLlmAdapter(LLMPort):
             )
             yield sse_event("result", envelope.model_dump(by_alias=True))
         except Exception as exc:
-            logger.warning("LLM analyze_text_stream failed: %s", exc)
-            envelope = make_envelope(
-                mode=self.mode,
-                provider="rules-engine",
-                trace_id=trace_id,
-                source_refs=[SourceRef(title="规则引擎", note="LLM 调用失败回退")],
-                disclaimer="分析结果由规则引擎生成，仅供参考。",
-                normalized_payload={"analysis": f"LLM 调用失败: {exc}", "error": True},
-            )
-            yield sse_event("result", envelope.model_dump(by_alias=True))
+            logger.warning("LLM analyze_text_stream failed, retrying synchronously: %s", exc)
+            try:
+                sync_result = self.analyze_text(system_prompt, user_prompt, trace_id)
+                yield sse_event("result", sync_result.model_dump(by_alias=True))
+            except Exception as inner_exc:
+                logger.warning("LLM analyze_text sync retry also failed: %s", inner_exc)
+                envelope = make_envelope(
+                    mode=self.mode,
+                    provider="rules-engine",
+                    trace_id=trace_id,
+                    source_refs=[SourceRef(title="规则引擎", note="LLM 调用失败回退")],
+                    disclaimer="分析结果由规则引擎生成，仅供参考。",
+                    normalized_payload={"analysis": f"LLM 调用失败: {exc}", "error": True},
+                )
+                yield sse_event("result", envelope.model_dump(by_alias=True))
