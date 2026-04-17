@@ -72,14 +72,28 @@ class RealPublicWebSearchAdapter(PublicWebSearchPort):
 
     def _search_duckduckgo(self, query: str, trace_id: str):
         try:
+            import ssl
+
             results = []
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
+            ssl_context = ssl.create_default_context()
+            ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')
+
+            with httpx.Client(
+                timeout=15,
+                follow_redirects=True,
+                verify=ssl_context,
+                http2=False,
+            ) as client:
                 resp = client.get(
                     "https://html.duckduckgo.com/html/",
                     params={"q": query},
                     headers={
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "DNT": "1",
+                        "Connection": "keep-alive",
                     },
                 )
                 resp.raise_for_status()

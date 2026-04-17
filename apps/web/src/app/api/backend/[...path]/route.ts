@@ -649,12 +649,22 @@ async function proxyWithRetry(
 
   const response = await fetch(target, {
     method: request.method,
-    headers: {
-      ...(request.headers.get("content-type")
-        ? { "Content-Type": request.headers.get("content-type") as string }
-        : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
+    headers: (() => {
+      const headers: Record<string, string> = {};
+      const ct = request.headers.get("content-type");
+      if (ct) {
+        // Ensure charset=utf-8 for JSON requests to handle non-ASCII characters
+        if (ct.includes("application/json") && !ct.includes("charset")) {
+          headers["Content-Type"] = "application/json; charset=utf-8";
+        } else {
+          headers["Content-Type"] = ct;
+        }
+      }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return headers;
+    })(),
     body: request.method === "GET" ? undefined : body,
     cache: "no-store"
   });

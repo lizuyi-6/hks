@@ -312,7 +312,6 @@ def get_user_workflows(
         query = query.filter(WorkflowInstance.tenant_id == tenant_id)
     elif user_id:
         query = query.filter(WorkflowInstance.user_id == user_id)
-    )
     if status:
         query = query.filter(WorkflowInstance.status == status)
     return query.order_by(WorkflowInstance.created_at.desc()).all()
