@@ -68,7 +68,7 @@ export function ContractWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="合同审查" eyebrow="Contract Review">
+      <SectionCard title="合同审查" eyebrow="合同审查">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <FileUpload onTextExtracted={setContractText} label="上传合同文件，自动提取文本" />
           <textarea
@@ -111,7 +111,7 @@ export function ContractWorkspace() {
         <>
         <SectionCard
           title="审查结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="flex items-center gap-3">
@@ -219,7 +219,7 @@ export function PatentWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="专利/软著评估" eyebrow="Patent & Copyright">
+      <SectionCard title="专利/软著评估" eyebrow="知识产权">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <FileUpload onTextExtracted={setDescription} label="上传技术文档，自动提取描述" />
           <textarea
@@ -262,7 +262,7 @@ export function PatentWorkspace() {
         <>
         <SectionCard
           title="评估结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="flex items-center gap-3">
@@ -355,7 +355,7 @@ export function PolicyWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="行业政策摘要" eyebrow="Policy Digest">
+      <SectionCard title="行业政策摘要" eyebrow="政策速递">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="industry"
@@ -394,7 +394,7 @@ export function PolicyWorkspace() {
         <>
         <SectionCard
           title={`${result.normalizedPayload.industry} 行业政策`}
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="space-y-3">
@@ -485,7 +485,7 @@ export function DueDiligenceWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="融资尽调" eyebrow="Due Diligence">
+      <SectionCard title="融资尽调" eyebrow="尽调报告">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="companyName"
@@ -524,7 +524,7 @@ export function DueDiligenceWorkspace() {
         <>
         <SectionCard
           title="尽调结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="flex items-center gap-3">

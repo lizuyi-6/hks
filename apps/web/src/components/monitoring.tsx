@@ -97,7 +97,7 @@ function MonitoringTab() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="侵权监控" eyebrow="Monitoring">
+      <SectionCard title="侵权监控" eyebrow="侵权监控">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="query"
@@ -127,7 +127,7 @@ function MonitoringTab() {
       </SectionCard>
 
       {result && (
-        <SectionCard title="扫描结果" eyebrow="Result" actions={<SourceTag mode={result.mode as "real" | "mock"} provider={result.provider} />}>
+        <SectionCard title="扫描结果" eyebrow="结果" actions={<SourceTag mode={result.mode as "real" | "mock"} provider={result.provider} />}>
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 p-4 text-center">
               <p className="text-2xl font-bold text-slate-900">{result.normalizedPayload.total}</p>
@@ -189,7 +189,7 @@ function CompetitorTab() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="竞争对手追踪" eyebrow="Competitor">
+      <SectionCard title="竞争对手追踪" eyebrow="竞争对手">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="companyName"
@@ -219,7 +219,7 @@ function CompetitorTab() {
       </SectionCard>
 
       {result && payload && (
-        <SectionCard title="追踪结果" eyebrow="Result" actions={<SourceTag mode={result.mode as "real" | "mock"} provider={result.provider} />}>
+        <SectionCard title="追踪结果" eyebrow="结果" actions={<SourceTag mode={result.mode as "real" | "mock"} provider={result.provider} />}>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-700">IP 活跃度</p>

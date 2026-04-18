@@ -12,7 +12,7 @@ export function SkeletonModule({
   featureName: string;
 }) {
   return (
-    <SectionCard title={title} eyebrow="Skeleton Module">
+    <SectionCard title={title} eyebrow="待开发模块">
       <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-4">
           <p className="leading-7 text-slate-600">{description}</p>
@@ -24,7 +24,7 @@ export function SkeletonModule({
         <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-5">
           <p className="text-sm font-medium text-slate-700">当前状态</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <StatusBadge label="Feature Flag" tone="info" />
+            <StatusBadge label="功能开关" tone="info" />
             <StatusBadge label={featureName} tone="info" />
             <StatusBadge label="待接入" tone="warning" />
           </div>

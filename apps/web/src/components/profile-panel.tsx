@@ -89,7 +89,7 @@ export function ProfilePanel() {
 
   if (loading) {
     return (
-      <SectionCard title="加载中..." eyebrow="Profile">
+      <SectionCard title="加载中..." eyebrow="个人中心">
         <div className="flex items-center justify-center py-8">
           <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
         </div>
@@ -102,7 +102,7 @@ export function ProfilePanel() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="个人中心" eyebrow="Profile">
+      <SectionCard title="个人中心" eyebrow="个人中心">
         <p className="text-sm leading-7 text-slate-600">
           管理您的个人和业务信息。完整的信息有助于更准确的分析和建议。
         </p>
@@ -323,7 +323,7 @@ function ChangePasswordCard() {
     "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none ring-rust/20 focus:ring";
 
   return (
-    <SectionCard title="修改密码" eyebrow="Security">
+    <SectionCard title="修改密码" eyebrow="安全设置">
       <form onSubmit={handleSubmit} className="grid gap-4">
         <input
           name="oldPassword"

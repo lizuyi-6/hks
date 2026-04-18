@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A1+ IP Coworker — AI-powered intellectual-property assistance for Chinese small-business founders. Prepares documents, analyzes IP situations, and guides submissions. Does **not** submit to official systems on behalf of users. All AI output carries a "仅供参考，以官方为准" disclaimer.
 
+> **Working directory**: The git root is one level above this file. All paths and commands below are relative to this `hks/` directory. Run `cd hks` before executing any command.
+
 ## Commands
 
 ```bash
@@ -65,8 +67,13 @@ npm run test             # web + api tests
 - Routes in `app/api/routes/` — 13 route modules (analytics, assets, auth, diagnosis, jobs, module_results, placeholders, reminders, stream, suggestions, system, trademarks, workflows)
 - SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence. The LLM adapter (`adapters/real/llm.py`) exposes async `*_stream()` variants (e.g. `diagnose_stream()`, `analyze_text_stream()`) that yield SSE tokens; non-streaming callers use the sync counterparts
 - Error handling: `app/core/error_handler.py` defines a typed hierarchy (`ValidationError`, `NotFoundError`, `AuthError`, `BusinessError`, `SystemError`) with structured JSON responses
-- Database models (`app/db/models.py`): `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult` — UUID string PKs, JSON columns
+- Database models (`app/db/models.py`): 14 tables — `Tenant`, `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult`, `SystemEvent`, `AutomationRule`, `Notification` — UUID string PKs, JSON columns
 - Auth: PBKDF2-SHA256 password hashing, HS256 JWT tokens (`app/core/security.py`)
+
+### CLI (`apps/cli`)
+
+- Argparse-based CLI agent that talks to the API via httpx
+- Supports: chat (SSE-to-JSON collection), trademark checks, diagnosis, asset listing, application generation, contract review, patent assessment, policy digests
 
 ### Worker (`apps/worker`)
 
@@ -81,6 +88,13 @@ npm run test             # web + api tests
 - `apps/api/app/services/workflow_engine.py` orchestrates multi-step flows (e.g. `trademark-registration`: diagnosis → check → application → submit guide → ledger)
 - Step outputs are deep-merged into workflow context for downstream steps
 - `get_suggestions()` generates contextual suggestions based on user state (running workflows, completed diagnoses, expiring assets)
+
+### Event System
+
+- `services/event_bus.py` with `emit_event()` creates `SystemEvent` records
+- `services/event_types.py` defines event constants (`JOB_COMPLETED`, `MONITORING_ALERT`, `ASSET_EXPIRING_SOON`, etc.)
+- `services/automation_engine.py` processes events and fires `AutomationRule` actions
+- `worker/event_processor.py` consumes and processes events asynchronously
 
 ### Shared TS Packages
 

@@ -4,47 +4,17 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { WorkflowInstance } from "@a1plus/domain";
+
 import { modules } from "@a1plus/domain";
-import { PipelineIndicator, StatusBadge, cn } from "@a1plus/ui";
+import { cn } from "@a1plus/ui";
 import { proxyBaseUrl } from "@/lib/env";
 import GooeyNav from "@/components/gooey-nav";
 
-const stepTypeNames: Record<string, string> = {
-  diagnosis: "IP 诊断",
-  trademark_check: "商标查重",
-  application_generate: "申请书生成",
-  submission_guide: "提交引导",
-  ledger_write: "入台账",
-  reminder_create: "创建提醒",
-  monitoring_scan: "侵权监控",
-  competitor_track: "竞争对手追踪",
-  contract_review: "合同审查",
-  patent_assess: "专利评估",
-  policy_digest: "政策速递",
-  due_diligence: "尽调报告"
-};
-
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowInstance | null>(null);
   const [userName, setUserName] = useState<string>("");
   const [profileComplete, setProfileComplete] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
-
-  useEffect(() => {
-    fetch(`${proxyBaseUrl}/workflows?status=running`, { credentials: "include" })
-      .then((res) => {
-        if (res.status === 401) { window.location.href = "/login"; return []; }
-        return res.json() as Promise<WorkflowInstance[]>;
-      })
-      .then((workflows) => {
-        if (workflows && workflows.length > 0) {
-          setActiveWorkflow(workflows[0]);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
@@ -92,20 +62,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             <p className="mt-3 text-sm leading-7 text-slate-600 animate-fade-up" style={{ animationDelay: '0.1s' }}>
               商标查重、申请书生成、IP诊断与资产管理，一站式服务。
             </p>
-            {activeWorkflow ? (
-              <div className="mb-6 mt-6 rounded-2xl border border-slate-200 bg-white/80 p-4 animate-scale-in">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-slate-700">{activeWorkflow.workflowType}</p>
-                  <StatusBadge label={activeWorkflow.status} tone="info" />
-                </div>
-                <div className="mt-3">
-                  <PipelineIndicator
-                    steps={activeWorkflow.steps.map((step) => ({ name: stepTypeNames[step.stepType] ?? step.stepType }))}
-                    currentIndex={activeWorkflow.currentStepIndex}
-                  />
-                </div>
-              </div>
-            ) : null}
             <nav className="mt-8 space-y-2 stagger-list">
               {modules.map((item) => {
                 const active =
@@ -130,15 +86,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                           {item.description}
                         </p>
                       </div>
-                      {item.href === "/inbox" && unreadCount > 0 ? (
+                      {item.href === "/inbox" && unreadCount > 0 && (
                         <span className="ml-auto rounded-full bg-red-500 text-white text-xs px-2 py-0.5 min-w-[20px] text-center animate-scale-in">
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
-                      ) : (
-                      <StatusBadge
-                        label={item.status === "core" ? "Core" : "Skeleton"}
-                        tone={item.status === "core" ? "success" : "info"}
-                      />
                       )}
                     </div>
                   </Link>

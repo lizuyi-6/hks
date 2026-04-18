@@ -137,6 +137,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function DashboardPanel() {
+  const workflowStatusNames: Record<string, string> = {
+    running: "进行中",
+    pending: "等待中",
+    completed: "已完成",
+    failed: "已失败"
+  };
+  const reminderStatusNames: Record<string, string> = {
+    queued: "排队中",
+    processing: "处理中",
+    sent: "已发送",
+    failed: "已失败",
+    dead_letter: "死信"
+  };
   const router = useRouter();
   const [health, setHealth] = useState<ProviderHealth | null>(null);
   const [assets, setAssets] = useState<IpAsset[]>([]);
@@ -197,7 +210,7 @@ export function DashboardPanel() {
         onCardClick={handleBentoCardClick}
       />
 
-      <SectionCard title="待办建议" eyebrow="Suggestions">
+      <SectionCard title="待办建议" eyebrow="待办建议">
         {suggestions.length === 0 ? (
           <p className="text-sm text-slate-500">暂无待办建议</p>
         ) : (
@@ -235,7 +248,7 @@ export function DashboardPanel() {
         )}
       </SectionCard>
 
-      <SectionCard title="活跃工作流" eyebrow="Workflows">
+      <SectionCard title="活跃工作流" eyebrow="工作流">
         {workflows.length === 0 ? (
           <p className="text-sm text-slate-500">暂无进行中的工作流</p>
         ) : (
@@ -259,7 +272,7 @@ export function DashboardPanel() {
                 <div key={workflow.id} className="rounded-2xl border border-slate-200 p-4">
                   <div className="flex items-center justify-between">
                     <p className="font-medium text-slate-900">{workflow.workflowType}</p>
-                    <StatusBadge label={workflow.status} tone="info" />
+                    <StatusBadge label={workflowStatusNames[workflow.status] ?? workflow.status} tone="info" />
                   </div>
                   <div className="mt-4">
                     <PipelineIndicator
@@ -344,8 +357,8 @@ export function DashboardPanel() {
         </div>
       </SectionCard>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <SectionCard title="最近资产" eyebrow="Ledger">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <SectionCard title="最近资产" eyebrow="资产台账">
           <div className="space-y-3">
             {assets.length === 0 ? (
               <p className="text-sm text-slate-500">还没有资产，完成申请书生成后会自动入台账。</p>
@@ -363,7 +376,7 @@ export function DashboardPanel() {
           </div>
         </SectionCard>
 
-        <SectionCard title="提醒队列" eyebrow="Queue">
+        <SectionCard title="提醒队列" eyebrow="提醒队列">
           <div className="space-y-3">
             {reminders.length === 0 ? (
               <p className="text-sm text-slate-500">暂无提醒任务。</p>
@@ -375,7 +388,7 @@ export function DashboardPanel() {
                     <p className="text-sm text-slate-500">到期时间 {new Date(task.dueAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</p>
                   </div>
                   <StatusBadge
-                    label={task.status}
+                    label={reminderStatusNames[task.status] ?? task.status}
                     tone={task.status === "sent" ? "success" : task.status === "failed" || task.status === "dead_letter" ? "danger" : "info"}
                   />
                 </div>
@@ -384,7 +397,7 @@ export function DashboardPanel() {
           </div>
         </SectionCard>
 
-        <SectionCard title="最近模块结果" eyebrow="Module Results">
+        <SectionCard title="最近模块结果" eyebrow="模块结果">
           <div className="space-y-3">
             {moduleResults.length === 0 ? (
               <p className="text-sm text-slate-500">暂无模块执行记录</p>
@@ -492,7 +505,7 @@ export function DiagnosisWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="IP 快速诊断" eyebrow="Core Flow">
+      <SectionCard title="IP 快速诊断" eyebrow="核心流程">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           {!prefill ? (
             <div className="flex items-center justify-center py-4">
@@ -560,7 +573,7 @@ export function DiagnosisWorkspace() {
         <>
         <SectionCard
           title="诊断结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={report.mode ?? "mock"} provider={report.provider ?? "mock"} />}
         >
           <p className="leading-7 text-slate-700">{report.normalizedPayload.summary}</p>
@@ -689,7 +702,7 @@ export function TrademarkCheckWorkspace({
 
   return (
     <div className="space-y-6">
-      <SectionCard title="商标查重分析" eyebrow="Core Flow">
+      <SectionCard title="商标查重分析" eyebrow="核心流程">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="trademarkName"
@@ -757,7 +770,7 @@ export function TrademarkCheckWorkspace({
         <>
         <SectionCard
           title="查重结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="flex flex-wrap items-center gap-3">
@@ -907,7 +920,7 @@ export function ApplicationWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="商标申请书生成" eyebrow="Core Flow">
+      <SectionCard title="商标申请书生成" eyebrow="核心流程">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="trademarkName"
@@ -975,7 +988,7 @@ export function ApplicationWorkspace() {
 
       {draft ? (
         <>
-        <SectionCard title="申请书结果" eyebrow="Documents">
+        <SectionCard title="申请书结果" eyebrow="文档">
           <div className="flex items-center gap-3">
             <SourceTag mode={draft.sourceMode} provider={draft.provider} />
             <StatusBadge label="自动入台账已启用" tone="success" />
@@ -1070,7 +1083,7 @@ export function SubmitGuideWorkspace({ draftId }: { draftId?: string }) {
   }, [draftId]);
 
   return (
-    <SectionCard title="提交流程引导" eyebrow="Compliance">
+    <SectionCard title="提交流程引导" eyebrow="合规引导">
       {error ? <ErrorDisplay error={error} /> : null}
       {guide ? (
         <div className="space-y-4">
@@ -1152,7 +1165,7 @@ export function AssetLedgerPanel() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="新增资产" eyebrow="Manual Ledger">
+      <SectionCard title="新增资产" eyebrow="手动入台账">
         <form onSubmit={async (e) => { e.preventDefault(); await handleCreate(new FormData(e.currentTarget)); }} className="grid gap-4 md:grid-cols-2">
           <input
             name="name"
@@ -1190,7 +1203,7 @@ export function AssetLedgerPanel() {
         {error ? <ErrorDisplay error={error} /> : null}
       </SectionCard>
 
-      <SectionCard title="资产列表" eyebrow="Auto + Manual">
+      <SectionCard title="资产列表" eyebrow="全部资产">
         <div className="space-y-3">
           {assets.length === 0 ? (
             <p className="text-sm text-slate-500">暂无资产记录。</p>
@@ -1250,7 +1263,7 @@ export function ReminderPanel() {
   }
 
   return (
-    <SectionCard title="提醒中心" eyebrow="Queue + Retry">
+    <SectionCard title="提醒中心" eyebrow="提醒管理">
       {error ? <ErrorDisplay error={error} /> : null}
       <div className="space-y-3">
         {tasks.length === 0 ? (
@@ -1339,7 +1352,7 @@ export function PatentAssessWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="专利/软著评估" eyebrow="Patent & Copyright">
+      <SectionCard title="专利/软著评估" eyebrow="知识产权">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <FileUpload onTextExtracted={setDescription} label="上传技术文档，自动提取描述" />
           <textarea
@@ -1379,7 +1392,7 @@ export function PatentAssessWorkspace() {
       {result && (
         <SectionCard
           title="评估结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode} provider={result.provider} />}
         >
           <div className="flex items-center gap-3">

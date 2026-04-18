@@ -78,7 +78,7 @@ export function CompetitorWorkspace() {
 
   return (
     <div className="space-y-6">
-      <SectionCard title="竞争对手追踪" eyebrow="Competitor">
+      <SectionCard title="竞争对手追踪" eyebrow="竞争对手">
         <form onSubmit={async (e) => { e.preventDefault(); await handleSubmit(new FormData(e.currentTarget)); }} className="grid gap-4">
           <input
             name="companyName"
@@ -115,7 +115,7 @@ export function CompetitorWorkspace() {
         <>
         <SectionCard
           title="追踪结果"
-          eyebrow="Result"
+          eyebrow="结果"
           actions={<SourceTag mode={result.mode as "real" | "mock"} provider={result.provider} />}
         >
           <div className="grid gap-4 md:grid-cols-2">

@@ -137,7 +137,7 @@ export function OnboardingWizard() {
 
       {/* Step 1: Basic Info */}
       {step === 1 && (
-        <SectionCard title="基本信息" eyebrow="Step 1">
+        <SectionCard title="基本信息" eyebrow="步骤 1">
           <p className="text-sm leading-7 text-slate-600">
             告诉我们您的企业信息，后续操作将自动预填。
           </p>
@@ -180,7 +180,7 @@ export function OnboardingWizard() {
 
       {/* Step 2: Business Description */}
       {step === 2 && (
-        <SectionCard title="业务描述" eyebrow="Step 2">
+        <SectionCard title="业务描述" eyebrow="步骤 2">
           <p className="text-sm leading-7 text-slate-600">
             了解您的业务方向有助于提供更精准的 IP 建议。
           </p>
@@ -250,7 +250,7 @@ export function OnboardingWizard() {
 
       {/* Step 3: IP Status */}
       {step === 3 && (
-        <SectionCard title="知识产权现状" eyebrow="Step 3">
+        <SectionCard title="知识产权现状" eyebrow="步骤 3">
           <p className="text-sm leading-7 text-slate-600">
             了解您当前的知识产权状况，帮助系统提供更有针对性的建议。
           </p>
@@ -330,7 +330,7 @@ export function OnboardingWizard() {
 
       {/* Step 4: Summary */}
       {step === 4 && (
-        <SectionCard title="确认信息" eyebrow="Step 4">
+        <SectionCard title="确认信息" eyebrow="步骤 4">
           <p className="text-sm leading-7 text-slate-600">
             确认以下信息，随时可在个人中心修改。
           </p>
