@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type {
   ApplicationDraft,
@@ -20,6 +21,7 @@ import { proxyBaseUrl } from "@/lib/env";
 import { parseErrorResponse, ApplicationError, getErrorDisplayInfo } from "@/lib/errors";
 import { fetchSSE } from "@/lib/sse";
 import { FileUpload } from "@/components/file-upload";
+import MagicBento from "@/components/magic-bento";
 
 type ProviderHealth = {
   providers: Array<{
@@ -135,6 +137,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function DashboardPanel() {
+  const router = useRouter();
   const [health, setHealth] = useState<ProviderHealth | null>(null);
   const [assets, setAssets] = useState<IpAsset[]>([]);
   const [reminders, setReminders] = useState<ReminderTask[]>([]);
@@ -163,23 +166,36 @@ export function DashboardPanel() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
+  const handleBentoCardClick = (index: number, label: string) => {
+    const routes: Record<string, string> = {
+      'Trademark': '/trademark/check',
+      'Diagnosis': '/diagnosis',
+      'Monitor': '/monitoring',
+      'Document': '/trademark/application',
+      'Patent': '/diagnosis?tab=patent',
+      'Ledger': '/assets'
+    };
+    const route = routes[label];
+    if (route) {
+      router.push(route);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <SectionCard
-        title="A1+ IP 主流程"
-        eyebrow="Overview"
-        actions={<StatusBadge label="已上线" tone="success" />}
-      >
-        <div className="grid gap-4 md:grid-cols-3">
-          <Metric label="模块数量" value={`${modules.length}`} detail="覆盖商标、专利、合同等核心业务" />
-          <Metric label="核心流程" value={`${coreWorkflow.length} 步`} detail="诊断到台账自动写入完整打通" />
-          <Metric label="法律边界" value="辅助准备" detail="不代替官方申报，提交由用户完成" />
-        </div>
-        <div className="rounded-3xl bg-slate-950 p-5 text-slate-100">
-          <p className="text-sm uppercase tracking-[0.24em] text-sand/80">Boundary</p>
-          <p className="mt-3 max-w-3xl leading-7 text-slate-200">{legalBoundaryNotice}</p>
-        </div>
-      </SectionCard>
+      <MagicBento
+        textAutoHide={true}
+        enableStars={true}
+        enableSpotlight={true}
+        enableBorderGlow={true}
+        enableTilt={true}
+        enableMagnetism={true}
+        clickEffect={true}
+        spotlightRadius={300}
+        particleCount={12}
+        glowColor="132, 0, 255"
+        onCardClick={handleBentoCardClick}
+      />
 
       <SectionCard title="待办建议" eyebrow="Suggestions">
         {suggestions.length === 0 ? (

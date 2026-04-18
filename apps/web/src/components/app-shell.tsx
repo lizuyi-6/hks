@@ -8,6 +8,7 @@ import type { WorkflowInstance } from "@a1plus/domain";
 import { modules } from "@a1plus/domain";
 import { PipelineIndicator, StatusBadge, cn } from "@a1plus/ui";
 import { proxyBaseUrl } from "@/lib/env";
+import GooeyNav from "@/components/gooey-nav";
 
 const stepTypeNames: Record<string, string> = {
   diagnosis: "IP 诊断",
@@ -176,7 +177,28 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </aside>
-        <main className="flex-1 space-y-6 overflow-y-auto animate-fade-in" key={pathname}>{children}</main>
+
+        {/* Mobile Navigation */}
+        <div className="fixed bottom-0 left-0 right-0 z-50 lg:hidden">
+          <div className="bg-slate-950/95 backdrop-blur-lg border-t border-white/10 px-2 py-2 safe-area-bottom">
+            <GooeyNav
+              items={[
+                { label: "收件箱", href: "/inbox" },
+                { label: "工作台", href: "/dashboard" },
+                { label: "IP规划", href: "/diagnosis" },
+                { label: "商标", href: "/trademark/check" },
+                { label: "资产", href: "/assets" },
+              ]}
+              particleCount={10}
+              particleDistances={[70, 8]}
+              particleR={80}
+              animationTime={500}
+              timeVariance={200}
+            />
+          </div>
+        </div>
+
+        <main className="flex-1 space-y-6 overflow-y-auto animate-fade-in pb-20 lg:pb-0" key={pathname}>{children}</main>
       </div>
     </div>
   );

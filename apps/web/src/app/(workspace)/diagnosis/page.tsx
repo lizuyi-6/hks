@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { DiagnosisWorkspace, PatentAssessWorkspace } from "@/components/workspace";
 
 type Tab = "diagnosis" | "patent";
@@ -10,8 +11,10 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "patent", label: "专利/软著评估" },
 ];
 
-export default function DiagnosisPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("diagnosis");
+function DiagnosisPageInner() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "patent" ? "patent" : "diagnosis";
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
 
   return (
     <div className="space-y-6">
@@ -34,5 +37,13 @@ export default function DiagnosisPage() {
       {activeTab === "diagnosis" && <DiagnosisWorkspace />}
       {activeTab === "patent" && <PatentAssessWorkspace />}
     </div>
+  );
+}
+
+export default function DiagnosisPage() {
+  return (
+    <Suspense>
+      <DiagnosisPageInner />
+    </Suspense>
   );
 }
