@@ -83,7 +83,8 @@ function formatDetail(detail: unknown): string | null {
 
 export function parseErrorResponse(
   text: string,
-  location: string = "unknown"
+  location: string = "unknown",
+  status?: number,
 ): ApplicationError {
   try {
     const data = JSON.parse(text);
@@ -99,7 +100,7 @@ export function parseErrorResponse(
           : undefined);
       return new ApplicationError(
         data.message || friendlyDetail || "Unknown error",
-        mapStatusToErrorType(data.errorType, text),
+        mapStatusToErrorType(data.errorType, text, status),
         data.errorLocation || location,
         data.requestId,
         structuredDetails
@@ -110,19 +111,33 @@ export function parseErrorResponse(
   }
   return new ApplicationError(
     text || "Request failed",
-    "UnknownError",
+    mapStatusToErrorType(undefined, text, status),
     location
   );
 }
 
 function mapStatusToErrorType(
   errorType: string | undefined,
-  text: string
+  text: string,
+  status?: number,
 ): ErrorType {
   if (errorType) {
     if (["ValidationError", "NotFoundError", "AuthError", "BusinessError", "SystemError", "NetworkError", "TimeoutError"].includes(errorType)) {
       return errorType as ErrorType;
     }
+  }
+  // HTTP status is the authoritative signal when the backend returns a raw
+  // FastAPI ``HTTPException`` (body = ``{detail: "..."}``) that carries no
+  // structured ``errorType``. Without this, every 400/403 was collapsing to
+  // ``UnknownError`` in the UI.
+  if (typeof status === "number") {
+    if (status === 401) return "AuthError";
+    if (status === 404) return "NotFoundError";
+    if (status === 422) return "ValidationError";
+    if (status === 408 || status === 504) return "TimeoutError";
+    if (status === 502 || status === 503) return "NetworkError";
+    if (status >= 400 && status < 500) return "BusinessError";
+    if (status >= 500) return "SystemError";
   }
   if (text.includes("401") || text.includes("未登录") || text.includes("Unauthorized")) {
     return "AuthError";

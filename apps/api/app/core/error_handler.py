@@ -138,13 +138,26 @@ def register_error_handlers(app: FastAPI) -> None:
         )
         # Never leak internal exception text to clients in production.
         client_message = "内部错误，请稍后重试" if _IS_PRODUCTION else str(exc)
-        error_response = {
+        error_response: dict = {
             "errorType": "UnknownError",
             "message": client_message,
             "errorLocation": f"{request.method} {request.url.path}",
             "requestId": request_id,
             "timestamp": datetime.utcnow().isoformat(),
         }
+        # Surface the underlying exception class in non-production environments
+        # so the workbench "详情" panel can tell ``UndefinedColumn`` apart from
+        # ``ConnectionRefusedError`` without requiring server log access.
+        if not _IS_PRODUCTION:
+            details: dict = {"exception": type(exc).__name__}
+            # SQLAlchemy-style exceptions expose the offending SQL on ``.statement``.
+            statement = getattr(exc, "statement", None)
+            if isinstance(statement, str) and statement:
+                details["sql"] = statement[:500]
+            orig = getattr(exc, "orig", None)
+            if orig is not None:
+                details["origin"] = f"{type(orig).__name__}: {orig}"[:500]
+            error_response["details"] = details
         return JSONResponse(status_code=500, content=error_response)
 
 

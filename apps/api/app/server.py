@@ -40,52 +40,81 @@ from apps.api.app.core.logging import configure_logging
 _log = logging.getLogger(__name__)
 
 
-def _sqlite_lightweight_migrate() -> None:
+def _lightweight_migrate() -> None:
     """Apply best-effort ALTER TABLE for columns added after initial table creation.
 
     `Base.metadata.create_all()` only creates missing tables — it never issues
     `ALTER TABLE` for columns added to an already-existing table. In the demo /
-    dev SQLite setup this causes `OperationalError: no such column` after new
-    columns land. A proper Alembic migration is out of scope for the demo rig;
-    we introspect and patch only the known cases.
+    dev SQLite and docker-compose Postgres setups this causes
+    `OperationalError: no such column` / `UndefinedColumn` after new columns
+    land. A proper Alembic migration is out of scope for the demo rig;
+    we introspect and patch only the known cases on both backends.
     """
 
-    if engine.url.get_backend_name() != "sqlite":
+    backend = engine.url.get_backend_name()
+    if backend not in ("sqlite", "postgresql"):
         return
 
     insp = inspect(engine)
     try:
         existing_tables = set(insp.get_table_names())
     except Exception as exc:  # pragma: no cover — defensive
-        _log.warning("sqlite migrate: table inspect failed: %s", exc)
+        _log.warning("lightweight migrate: table inspect failed: %s", exc)
         return
 
-    patches: list[tuple[str, str, str]] = [
-        # (table, column, DDL fragment)
-        ("provider_leads", "assignee_id", "ALTER TABLE provider_leads ADD COLUMN assignee_id VARCHAR(36)"),
-        ("provider_leads", "assigned_at", "ALTER TABLE provider_leads ADD COLUMN assigned_at DATETIME"),
-        ("legal_service_providers", "tag_vec", "ALTER TABLE legal_service_providers ADD COLUMN tag_vec JSON DEFAULT '{}'"),
-        ("legal_service_providers", "tag_vec_updated_at", "ALTER TABLE legal_service_providers ADD COLUMN tag_vec_updated_at DATETIME"),
+    # (table, column, sqlite DDL, postgres DDL)
+    patches: list[tuple[str, str, str, str]] = [
+        (
+            "provider_leads",
+            "assignee_id",
+            "ALTER TABLE provider_leads ADD COLUMN assignee_id VARCHAR(36)",
+            "ALTER TABLE provider_leads ADD COLUMN IF NOT EXISTS assignee_id VARCHAR(36)",
+        ),
+        (
+            "provider_leads",
+            "assigned_at",
+            "ALTER TABLE provider_leads ADD COLUMN assigned_at DATETIME",
+            "ALTER TABLE provider_leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ",
+        ),
+        (
+            "legal_service_providers",
+            "tag_vec",
+            "ALTER TABLE legal_service_providers ADD COLUMN tag_vec JSON DEFAULT '{}'",
+            "ALTER TABLE legal_service_providers ADD COLUMN IF NOT EXISTS tag_vec JSON DEFAULT '{}'::json",
+        ),
+        (
+            "legal_service_providers",
+            "tag_vec_updated_at",
+            "ALTER TABLE legal_service_providers ADD COLUMN tag_vec_updated_at DATETIME",
+            "ALTER TABLE legal_service_providers ADD COLUMN IF NOT EXISTS tag_vec_updated_at TIMESTAMPTZ",
+        ),
     ]
 
     with engine.begin() as conn:
-        for table, column, ddl in patches:
+        for table, column, sqlite_ddl, postgres_ddl in patches:
             if table not in existing_tables:
                 continue
             cols = {c["name"] for c in insp.get_columns(table)}
             if column in cols:
                 continue
+            ddl = sqlite_ddl if backend == "sqlite" else postgres_ddl
             try:
                 conn.execute(text(ddl))
-                _log.info("sqlite migrate: added %s.%s", table, column)
+                _log.info("lightweight migrate (%s): added %s.%s", backend, table, column)
             except Exception as exc:  # pragma: no cover — defensive
-                _log.warning("sqlite migrate: failed %s.%s — %s", table, column, exc)
+                _log.warning(
+                    "lightweight migrate (%s): failed %s.%s — %s",
+                    backend,
+                    table,
+                    column,
+                    exc,
+                )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    _sqlite_lightweight_migrate()
+    _lightweight_migrate()
     try:
         yield
     finally:

@@ -54,7 +54,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { ...jsonHeaders, ...(init?.headers ?? {}) },
   });
-  if (!response.ok) throw parseErrorResponse(await response.text(), path);
+  if (!response.ok) throw parseErrorResponse(await response.text(), path, response.status);
   return response.json() as Promise<T>;
 }
 

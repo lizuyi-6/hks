@@ -6,7 +6,8 @@
  * 覆盖「精准获客 + 智能匹配」赛道关键词。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge } from "@a1plus/ui";
+import Link from "next/link";
+import { Alert, Badge } from "@a1plus/ui";
 import {
   PageHeader,
   SectionHeader,
@@ -170,6 +171,18 @@ const TEMPERATURE_ACCENT: Record<string, Accent> = {
 
 export function ProviderSpace() {
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [providerState, setProviderState] = useState<
+    "loading" | "present" | "missing"
+  >("loading");
+
+  useEffect(() => {
+    // Probe the provider profile once at mount. If absent we surface a
+    // self-service banner instead of letting every sub-tab swallow the
+    // resulting 403 / BusinessError on its own mutations.
+    request<ProviderProfile | null>("/providers/me")
+      .then((p) => setProviderState(p ? "present" : "missing"))
+      .catch(() => setProviderState("missing"));
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -180,6 +193,26 @@ export function ProviderSpace() {
         accent="info"
         description="新线索、我的产品、委托订单、客户 360° 画像 —— 精准获客从这里开始。"
       />
+      {providerState === "missing" && (
+        <Alert variant="warning" showIcon={true}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-text-primary">
+                当前账号还未开通律师 / 代理档案
+              </p>
+              <p className="mt-1 text-xs text-text-secondary">
+                团队成员、产品上架、线索认领等能力都依赖律师档案。前往个人中心完善执业信息即可解锁。
+              </p>
+            </div>
+            <Link
+              href="/profile"
+              className="shrink-0 rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-primary-700"
+            >
+              去完善档案
+            </Link>
+          </div>
+        </Alert>
+      )}
       <IconTabBar<Tab>
         tabs={[
           { key: "dashboard", label: "工作台", icon: "dashboard" },
@@ -829,15 +862,28 @@ function TeamTab() {
   }>({ displayName: "", role: "associate", email: "", specialties: "" });
 
   const load = useCallback(async () => {
-    try {
-      const [m, l] = await Promise.all([
-        request<FirmMember[]>("/provider-leads/firm-members"),
-        request<Lead[]>("/provider-leads"),
-      ]);
-      setMembers(m);
-      setLeads(l);
-    } catch (e) {
-      setError(e instanceof ApplicationError ? e : String(e));
+    const [memberRes, leadRes] = await Promise.allSettled([
+      request<FirmMember[]>("/provider-leads/firm-members"),
+      request<Lead[]>("/provider-leads"),
+    ]);
+
+    if (memberRes.status === "fulfilled") {
+      setMembers(memberRes.value);
+    }
+    if (leadRes.status === "fulfilled") {
+      setLeads(leadRes.value);
+    }
+
+    // Pick the richest error so the "详情" panel can point at the exact
+    // endpoint that failed (instead of Promise.all's race-winner rejection).
+    const firstFailure = [memberRes, leadRes].find(
+      (r) => r.status === "rejected"
+    ) as PromiseRejectedResult | undefined;
+    if (firstFailure) {
+      const reason = firstFailure.reason;
+      setError(reason instanceof ApplicationError ? reason : String(reason));
+    } else {
+      setError(null);
     }
   }, []);
 

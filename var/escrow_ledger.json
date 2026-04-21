@@ -88,5 +88,18 @@
     "escrow_ref": "ESC-93A969EE",
     "held_at": "2026-04-20T04:11:10.003609+00:00",
     "released_at": "2026-04-20T04:11:10.483985+00:00"
+  },
+  "4e8a0eec-15be-4fd5-9c5c-c0a2356cebff": {
+    "order_id": "4e8a0eec-15be-4fd5-9c5c-c0a2356cebff",
+    "state": "held",
+    "history": [
+      {
+        "state": "held",
+        "at": "2026-04-21T09:07:38.060000+00:00"
+      }
+    ],
+    "amount": 1800,
+    "escrow_ref": "ESC-4E8A0EEC",
+    "held_at": "2026-04-21T09:07:38.055617+00:00"
   }
 }

@@ -51,7 +51,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const detail = await response.text();
-    const err = parseErrorResponse(detail, path);
+    const err = parseErrorResponse(detail, path, response.status);
     trackError({
       event: "error",
       error_type: "api_error",
