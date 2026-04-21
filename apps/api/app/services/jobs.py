@@ -149,7 +149,10 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
             )
             _heartbeat(db, job)
             envelope = provider_registry.get("llm").diagnose(
-                payload, knowledge.model_dump(), trace_id=job.id
+                payload,
+                knowledge.model_dump(),
+                trace_id=job.id,
+                tenant_id=job.tenant_id,
             )
             _heartbeat(db, job)
             job.result = envelope.model_dump(mode="json", by_alias=True)
@@ -208,7 +211,7 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
             payload = ApplicationDraftRequest.model_validate(job.payload)
             _heartbeat(db, job)
             summary = provider_registry.get("llm").summarize_application(
-                payload, trace_id=job.id
+                payload, trace_id=job.id, tenant_id=job.tenant_id
             )
             _heartbeat(db, job)
             docx_path, pdf_path = provider_registry.get("documentRender").render_application(
@@ -228,6 +231,25 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
             )
             db.add(record)
             db.flush()
+
+            try:
+                emit_event(
+                    db,
+                    event_type=event_types.DOCUMENT_GENERATED,
+                    user_id=(job.payload or {}).get("_user_id"),
+                    tenant_id=job.tenant_id,
+                    source_entity_type="document_record",
+                    source_entity_id=record.id,
+                    payload={
+                        "title": "生成商标申请书",
+                        "detail": f"{payload.trademark_name} · {payload.applicant_name}",
+                        "trademark_name": payload.trademark_name,
+                        "applicant_name": payload.applicant_name,
+                        "risk_level": payload.risk_level,
+                    },
+                )
+            except Exception:  # pragma: no cover — defensive
+                logger.exception("document.generated emit failed doc=%s", record.id)
 
             asset = IpAsset(
                 name=payload.trademark_name,
@@ -322,6 +344,7 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
                     f"{payload['offset_days']} days."
                 ),
                 trace_id=job.id,
+                tenant_id=job.tenant_id,
             )
             job.result = envelope.model_dump(mode="json", by_alias=True)
             reminder = db.query(ReminderTask).filter(ReminderTask.job_id == job.id).first()
@@ -330,14 +353,22 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
 
         elif job.job_type == "monitoring.scan":
             provider = provider_registry.get("monitoring")
-            result = provider.scan(job.payload.get("query", ""), trace_id=job.id)
+            result = provider.scan(
+                job.payload.get("query", ""),
+                trace_id=job.id,
+                tenant_id=job.tenant_id,
+            )
             result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
             job.result = result_dict
             _save_module_result(db, job, "monitoring", result_dict)
 
         elif job.job_type == "competitor.track":
             provider = provider_registry.get("competitor")
-            result = provider.track(job.payload.get("company_name", ""), trace_id=job.id)
+            result = provider.track(
+                job.payload.get("company_name", ""),
+                trace_id=job.id,
+                tenant_id=job.tenant_id,
+            )
             result_dict = result.model_dump(mode="json", by_alias=True) if hasattr(result, "model_dump") else result
             job.result = result_dict
             _save_module_result(db, job, "competitor", result_dict)

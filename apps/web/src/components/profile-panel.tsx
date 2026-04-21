@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UserProfile } from "@a1plus/domain";
 import {
   WorkspaceCard,
@@ -32,21 +32,56 @@ const IP_FOCUS_OPTIONS: IpFocusOption[] = [
   { value: "design", label: "外观设计", icon: "sparkle", accent: "info" },
 ];
 
+type ActivityCategory =
+  | "login"
+  | "document"
+  | "profile"
+  | "asset"
+  | "security"
+  | "workflow"
+  | "matching"
+  | "system";
+
 type ActivityEntry = {
   id: string;
-  type: "login" | "document" | "profile" | "asset" | "security" | string;
+  type: ActivityCategory | string;
+  eventType?: string;
   title: string;
   detail: string;
   at: string;
 };
 
-const activityMeta: Record<string, { icon: IconName; accent: Accent }> = {
-  login: { icon: "user", accent: "info" },
-  document: { icon: "download", accent: "primary" },
-  profile: { icon: "edit", accent: "warning" },
-  asset: { icon: "assets", accent: "success" },
-  security: { icon: "lock", accent: "error" },
+type ActivityResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: ActivityEntry[];
 };
+
+const activityMeta: Record<string, { icon: IconName; accent: Accent; label: string }> = {
+  login: { icon: "user", accent: "info", label: "登录" },
+  document: { icon: "download", accent: "primary", label: "文档" },
+  profile: { icon: "edit", accent: "warning", label: "资料" },
+  asset: { icon: "assets", accent: "success", label: "资产" },
+  security: { icon: "lock", accent: "error", label: "安全" },
+  workflow: { icon: "automation", accent: "info", label: "任务" },
+  matching: { icon: "target", accent: "primary", label: "咨询/匹配" },
+  system: { icon: "sparkle", accent: "muted", label: "系统" },
+};
+
+const ACTIVITY_FILTERS: Array<{ value: ActivityCategory | "all"; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "login", label: "登录" },
+  { value: "profile", label: "资料" },
+  { value: "security", label: "安全" },
+  { value: "document", label: "文档" },
+  { value: "asset", label: "资产" },
+  { value: "workflow", label: "任务" },
+  { value: "matching", label: "咨询/匹配" },
+  { value: "system", label: "系统" },
+];
+
+const ACTIVITY_PAGE_SIZE = 20;
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -68,6 +103,9 @@ export function ProfilePanel() {
   const [error, setError] = useState<string | null>(null);
   const [ipFocus, setIpFocus] = useState<string[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityCategory, setActivityCategory] = useState<ActivityCategory | "all">("all");
+  const [activityLoading, setActivityLoading] = useState(false);
 
   useEffect(() => {
     fetch(`${proxyBaseUrl}/profile`, { credentials: "include" })
@@ -90,12 +128,39 @@ export function ProfilePanel() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadActivity = useCallback(
+    async (opts: { append?: boolean; category?: ActivityCategory | "all"; offset?: number } = {}) => {
+      const cat = opts.category ?? activityCategory;
+      const offset = opts.offset ?? 0;
+      const params = new URLSearchParams();
+      params.set("limit", String(ACTIVITY_PAGE_SIZE));
+      params.set("offset", String(offset));
+      if (cat !== "all") params.set("category", cat);
+
+      setActivityLoading(true);
+      try {
+        const res = await fetch(`${proxyBaseUrl}/profile/activity?${params.toString()}`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as ActivityResponse | ActivityEntry[];
+        // Tolerate the old flat-array shape for backwards compatibility.
+        const items = Array.isArray(body) ? body : body.items ?? [];
+        const total = Array.isArray(body) ? items.length : body.total ?? items.length;
+        setActivity((prev) => (opts.append ? [...prev, ...items] : items));
+        setActivityTotal(total);
+      } catch {
+        /* silent */
+      } finally {
+        setActivityLoading(false);
+      }
+    },
+    [activityCategory],
+  );
+
   useEffect(() => {
-    fetch(`${proxyBaseUrl}/profile/activity`, { credentials: "include" })
-      .then((r) => (r.ok ? (r.json() as Promise<ActivityEntry[]>) : []))
-      .then((data) => setActivity(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  }, []);
+    loadActivity({ category: activityCategory, offset: 0 });
+  }, [activityCategory, loadActivity]);
 
   const completion = useMemo(() => {
     if (!profile) return 0;
@@ -519,15 +584,40 @@ export function ProfilePanel() {
       </div>
 
       {/* ===== Activity timeline ===== */}
-      <WorkspaceCard title="账户活动" eyebrow="Activity" actions={
-        <Badge variant="outline" size="sm">{activity.length} 条</Badge>
-      }>
+      <WorkspaceCard
+        title="账户活动"
+        eyebrow="Activity"
+        actions={<Badge variant="outline" size="sm">共 {activityTotal} 条</Badge>}
+      >
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {ACTIVITY_FILTERS.map((f) => {
+            const active = activityCategory === f.value;
+            return (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setActivityCategory(f.value)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  active
+                    ? "border-transparent bg-info-500 text-text-inverse"
+                    : "border-border bg-surface text-text-secondary hover:border-info-400 hover:text-text-primary"
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
         {activity.length === 0 ? (
-          <p className="py-6 text-center text-sm text-text-tertiary">暂无活动</p>
+          <p className="py-6 text-center text-sm text-text-tertiary">
+            {activityLoading ? "加载中..." : "暂无活动"}
+          </p>
         ) : (
           <ol className="relative ml-4 border-l-2 border-dashed border-info-200">
             {activity.map((a, idx) => {
-              const meta = activityMeta[a.type] ?? { icon: "sparkle" as IconName, accent: "muted" as Accent };
+              const meta =
+                activityMeta[a.type] ?? { icon: "sparkle" as IconName, accent: "muted" as Accent, label: "活动" };
               const isFirst = idx === 0;
               return (
                 <li key={a.id} className="relative py-3 pl-7">
@@ -539,17 +629,50 @@ export function ProfilePanel() {
                     <IconGlyph name={meta.icon} size={11} />
                   </span>
                   <div className="rounded-md border border-border bg-surface-elevated px-3 py-2 transition-colors hover:border-info-200">
-                    <p className="text-sm font-medium text-text-primary">{a.title}</p>
-                    <p className="mt-0.5 text-xs text-text-secondary">{a.detail}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-text-primary">{a.title}</p>
+                      <Badge variant="outline" size="sm">
+                        {meta.label}
+                      </Badge>
+                    </div>
+                    {a.detail && <p className="mt-0.5 text-xs text-text-secondary">{a.detail}</p>}
                     <p className="mt-1 flex items-center gap-1.5 text-[11px] text-text-muted">
                       <IconGlyph name="clock" size={10} />
                       {relativeTime(a.at)}
+                      {a.eventType && (
+                        <span className="ml-1 rounded bg-surface px-1 font-mono text-[10px] text-text-muted">
+                          {a.eventType}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </li>
               );
             })}
           </ol>
+        )}
+
+        {activity.length < activityTotal && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              disabled={activityLoading}
+              onClick={() => loadActivity({ append: true, offset: activity.length })}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-text-secondary hover:border-info-500 hover:text-info-600 disabled:opacity-60"
+            >
+              {activityLoading ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-border border-t-info-500" />
+                  加载中
+                </>
+              ) : (
+                <>
+                  <IconGlyph name="refresh" size={12} />
+                  加载更多（剩 {activityTotal - activity.length} 条）
+                </>
+              )}
+            </button>
+          </div>
         )}
       </WorkspaceCard>
     </div>

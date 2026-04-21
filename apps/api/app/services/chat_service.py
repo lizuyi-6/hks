@@ -11,6 +11,8 @@ from apps.api.app.adapters.registry import provider_registry
 from apps.api.app.core.streaming import sse_event
 from apps.api.app.db.models import IpAsset, User
 from apps.api.app.schemas.chat import ChatRequest
+from apps.api.app.services import event_types
+from apps.api.app.services.event_bus import emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +344,27 @@ async def run_chat_stream(
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": request.message})
 
+    # 用户每开启一次新的对话（无历史）就落一条活动记录，便于账户时间线
+    # 展示「发起 AI 咨询」。重复消息不记录，避免刷屏。
+    if not history:
+        try:
+            emit_event(
+                db,
+                event_type=event_types.CHAT_STARTED,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                source_entity_type="chat_session",
+                source_entity_id=trace_id,
+                payload={
+                    "title": "发起 AI 咨询",
+                    "detail": (request.message or "").strip()[:120],
+                    "traceId": trace_id,
+                },
+            )
+            db.commit()
+        except Exception:  # pragma: no cover — defensive
+            logger.debug("chat.started emit failed trace=%s", trace_id)
+
     llm = provider_registry.get("llm")
     tool_call_count = 0
     follow_ups: list[str] = []
@@ -354,7 +377,9 @@ async def run_chat_stream(
         meta_sent = tool_call_count > 0
 
         stream_errored = False
-        async for event in llm.multi_turn_stream(messages, CHAT_TOOLS, system_prompt, trace_id):
+        async for event in llm.multi_turn_stream(
+            messages, CHAT_TOOLS, system_prompt, trace_id, tenant_id=user.tenant_id
+        ):
             event_type = event.get("type")
 
             if event_type == "meta":
@@ -519,6 +544,24 @@ def _maybe_auto_handoff(
             channel="handoff",
             handoff_reason=reason,
         )
+        try:
+            emit_event(
+                db,
+                event_type=event_types.CHAT_HANDOFF,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                source_entity_type="consultation_session",
+                source_entity_id=session.id,
+                payload={
+                    "title": "AI 转人工咨询",
+                    "detail": reason or "触发转人工",
+                    "traceId": trace_id,
+                    "confidence": conf,
+                },
+            )
+            db.commit()
+        except Exception:  # pragma: no cover — defensive
+            logger.debug("chat.handoff emit failed trace=%s", trace_id)
         return {
             "consultation_id": session.id,
             "status": session.status,
@@ -629,7 +672,9 @@ async def _execute_action(
         )
         kb = provider_registry.get("knowledgeBase")
         knowledge = kb.retrieve("ip-strategy", trace_id).normalized_payload
-        envelope = provider_registry.get("llm").diagnose(payload, knowledge, trace_id)
+        envelope = provider_registry.get("llm").diagnose(
+            payload, knowledge, trace_id, tenant_id=user.tenant_id
+        )
         result = envelope.normalized_payload
         return {
             "action": "ip_diagnosis",

@@ -20,6 +20,7 @@ import {
 } from "./primitives";
 import { ErrorDisplay, request } from "./shared";
 import { ApplicationError } from "@/lib/errors";
+import { useSetPageResource } from "@/lib/use-page-context";
 
 type MatchRequest = {
   id: string;
@@ -122,6 +123,8 @@ export function MatchPanel({ initialRequestId }: { initialRequestId?: string } =
   const [depthMap, setDepthMap] = useState<Record<string, ProviderDepth>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | ApplicationError | null>(null);
+
+  useSetPageResource(selected ? { type: "matching_request", id: selected } : null);
 
   const loadList = useCallback(async () => {
     setLoading(true);

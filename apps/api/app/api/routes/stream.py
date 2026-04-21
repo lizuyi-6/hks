@@ -96,10 +96,11 @@ async def _wrap_analyze_text_stream(
 @router.post("/diagnosis")
 async def stream_diagnosis(
     payload: DiagnosisRequest,
-    _ctx: TenantContext = Depends(get_current_tenant),
+    ctx: TenantContext = Depends(get_current_tenant),
 ):
     trace_id = f"stream-diag-{uuid.uuid4().hex[:12]}"
     llm = provider_registry.get("llm")
+    tenant_id = ctx.tenant.id if ctx.tenant else None
     # Fetch KB snippets so the LLM can ground its answer in the官方 catalog
     # instead of emitting generic-sounding prose.
     try:
@@ -114,7 +115,7 @@ async def stream_diagnosis(
     async def _guarded():
         from apps.api.app.core.streaming import sse_event as _sse_event
         try:
-            async for chunk in llm.diagnose_stream(payload, knowledge, trace_id):
+            async for chunk in llm.diagnose_stream(payload, knowledge, trace_id, tenant_id=tenant_id):
                 yield chunk
         except Exception:
             logger.exception("stream.diagnosis.failed trace_id=%s", trace_id)

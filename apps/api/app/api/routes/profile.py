@@ -11,13 +11,31 @@ from apps.api.app.schemas.profile import (
     ProfileUpdateRequest,
     UserProfileResponse,
 )
+from apps.api.app.services import event_types
 from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.event_bus import emit_event
 from apps.api.app.services.profile_engine import (
     build_profile_fingerprint,
     list_user_tags,
 )
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+# Human-readable labels for user profile fields, used when synthesizing an
+# activity-log entry for a profile edit.
+_PROFILE_FIELD_LABELS: dict[str, str] = {
+    "full_name": "姓名",
+    "business_name": "公司/项目名",
+    "business_description": "业务描述",
+    "industry": "行业",
+    "stage": "阶段",
+    "applicant_type": "申请人类型",
+    "applicant_name": "申请人名称",
+    "has_trademark": "已注册商标",
+    "has_patent": "已有专利/软著",
+    "ip_focus": "IP 焦点",
+}
 
 
 def _is_complete(user: User) -> bool:
@@ -55,8 +73,32 @@ def update_profile(
     db: Session = Depends(get_db),
 ):
     update_data = payload.model_dump(exclude_none=True)
+    changed_fields: list[str] = []
     for field, value in update_data.items():
-        setattr(user, field, value)
+        current = getattr(user, field, None)
+        if current != value:
+            changed_fields.append(field)
+            setattr(user, field, value)
+
+    if changed_fields:
+        labels = [_PROFILE_FIELD_LABELS.get(f, f) for f in changed_fields]
+        try:
+            emit_event(
+                db,
+                event_type=event_types.PROFILE_UPDATED,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                source_entity_type="user_profile",
+                source_entity_id=user.id,
+                payload={
+                    "title": "更新账号资料",
+                    "detail": f"修改了 {'、'.join(labels)}",
+                    "changed_fields": changed_fields,
+                },
+            )
+        except Exception:  # pragma: no cover — defensive
+            pass
+
     db.commit()
     db.refresh(user)
     return _to_response(user)
@@ -71,36 +113,87 @@ def get_profile_status(user: User = Depends(get_current_user)):
     )
 
 
-_EVENT_TYPE_MAP = {
-    "user.login": "login",
-    "user.logout": "login",
+# UI category mapping for the account activity timeline.
+# Every event type that ends up on a user row should land in exactly one
+# category. Unknown types fall through to ``"system"`` so they are still shown
+# (just with a generic icon) instead of being misfiled as profile edits.
+_EVENT_TYPE_MAP: dict[str, str] = {
+    # 认证与账户
+    event_types.USER_REGISTERED: "login",
+    event_types.USER_LOGIN: "login",
+    event_types.USER_LOGOUT: "login",
     "auth.login": "login",
-    "document.generated": "document",
-    "document.rendered": "document",
-    "profile.updated": "profile",
+    # 资料
+    event_types.PROFILE_UPDATED: "profile",
     "profile.update": "profile",
-    "asset.created": "asset",
-    "asset.updated": "asset",
-    "asset.deleted": "asset",
-    "auth.password_changed": "security",
+    # 安全
+    event_types.AUTH_PASSWORD_CHANGED: "security",
+    event_types.AUTH_PASSWORD_RESET_REQUESTED: "security",
+    event_types.AUTH_PASSWORD_RESET: "security",
     "security.alert": "security",
+    # 文档 / 上传
+    event_types.DOCUMENT_GENERATED: "document",
+    "document.rendered": "document",
+    event_types.FILE_UPLOADED: "document",
+    event_types.LICENSE_PARSED: "document",
+    # 资产
+    event_types.ASSET_CREATED: "asset",
+    event_types.ASSET_UPDATED: "asset",
+    event_types.ASSET_DELETED: "asset",
+    event_types.ASSET_EXPIRING_SOON: "asset",
+    # 工作流 / 任务
+    event_types.WORKFLOW_STEP_COMPLETED: "workflow",
+    event_types.WORKFLOW_STEP_AWAITING: "workflow",
+    event_types.WORKFLOW_COMPLETED: "workflow",
+    event_types.WORKFLOW_FAILED: "workflow",
+    event_types.JOB_COMPLETED: "workflow",
+    event_types.JOB_FAILED: "workflow",
+    event_types.DIAGNOSIS_COMPLETED: "workflow",
+    event_types.TRADEMARK_RED_FLAG: "workflow",
+    event_types.COMPLIANCE_AUDIT_COMPLETED: "workflow",
+    event_types.POLICY_DIGEST_READY: "workflow",
+    event_types.MONITORING_ALERT: "workflow",
+    event_types.COMPETITOR_CHANGE: "workflow",
+    event_types.LITIGATION_PREDICTED: "workflow",
+    event_types.LITIGATION_CASE_CREATED: "workflow",
+    # 匹配 / 咨询
+    event_types.MATCHING_REQUESTED: "matching",
+    event_types.PROVIDER_LEAD_CREATED: "matching",
+    event_types.CHAT_STARTED: "matching",
+    event_types.CHAT_HANDOFF: "matching",
+}
+
+# Fallback titles when an event's payload does not supply its own.
+_DEFAULT_CATEGORY_TITLE: dict[str, str] = {
+    "login": "账号登录",
+    "document": "生成/上传文档",
+    "profile": "更新账号资料",
+    "asset": "IP 资产变更",
+    "security": "安全事件",
+    "workflow": "后台任务进展",
+    "matching": "咨询/匹配活动",
+    "system": "平台活动",
 }
 
 
 def _event_to_activity(event: SystemEvent) -> dict:
-    category = _EVENT_TYPE_MAP.get(event.event_type, "profile")
+    category = _EVENT_TYPE_MAP.get(event.event_type, "system")
     payload = event.payload if isinstance(event.payload, dict) else {}
-    title = payload.get("title") or {
-        "login": "账号登录",
-        "document": "生成文档",
-        "profile": "更新个人资料",
-        "asset": "IP 资产变更",
-        "security": "安全事件",
-    }.get(category, event.event_type)
-    detail = payload.get("detail") or payload.get("description") or ""
+    title = (
+        payload.get("title")
+        or _DEFAULT_CATEGORY_TITLE.get(category)
+        or event.event_type
+    )
+    detail = (
+        payload.get("detail")
+        or payload.get("description")
+        or payload.get("summary")
+        or ""
+    )
     return {
         "id": event.id,
         "type": category,
+        "eventType": event.event_type,
         "title": title,
         "detail": detail,
         "at": event.created_at.isoformat(),
@@ -109,17 +202,39 @@ def _event_to_activity(event: SystemEvent) -> dict:
 
 @router.get("/activity")
 def get_profile_activity(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    category: str | None = Query(None, description="过滤类别：login/profile/security/document/asset/workflow/matching/system"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    base_query = db.query(SystemEvent).filter(SystemEvent.user_id == user.id)
+
+    if category:
+        allowed_types = [
+            event_type for event_type, cat in _EVENT_TYPE_MAP.items() if cat == category
+        ]
+        if category == "system":
+            # "系统" 桶包含未显式映射的事件类型。
+            base_query = base_query.filter(~SystemEvent.event_type.in_(list(_EVENT_TYPE_MAP.keys())))
+        elif allowed_types:
+            base_query = base_query.filter(SystemEvent.event_type.in_(allowed_types))
+        else:
+            base_query = base_query.filter(False)
+
+    total = base_query.count()
     events = (
-        db.query(SystemEvent)
-        .filter(SystemEvent.user_id == user.id)
-        .order_by(SystemEvent.created_at.desc())
-        .limit(20)
+        base_query.order_by(SystemEvent.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
-    return [_event_to_activity(e) for e in events]
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [_event_to_activity(e) for e in events],
+    }
 
 
 # --------------------------------------------------------------------------

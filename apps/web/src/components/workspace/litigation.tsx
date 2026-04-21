@@ -311,18 +311,41 @@ function LitigationInner() {
             body: JSON.stringify({ overrides, persist: false }),
           },
         );
-        // Normalize simulate response into Prediction shape
-        setSimulated({
-          ...activePrediction,
-          win_probability: res.adjusted_probability ?? res.win_probability,
-          risk_level: (res as Prediction).risk_level ?? activePrediction.risk_level,
-          headline: (res as Prediction).headline ?? activePrediction.headline,
-          money_low: (res as Prediction).money_low ?? activePrediction.money_low,
-          money_high: (res as Prediction).money_high ?? activePrediction.money_high,
-          duration_days_low: (res as Prediction).duration_days_low ?? activePrediction.duration_days_low,
-          duration_days_high: (res as Prediction).duration_days_high ?? activePrediction.duration_days_high,
-          strategies: (res as Prediction).strategies?.length ? (res as Prediction).strategies : activePrediction.strategies,
-          probability_factors: (res as Prediction).probability_factors ?? activePrediction.probability_factors,
+        // Normalize simulate response into Prediction shape. Critically, we
+        // overwrite `rationale` / `evidence_checklist` / `headline` from the
+        // backend so the text and evidence ticks track the live probability
+        // instead of staying frozen on the persisted prediction.
+        const sim = res as Prediction & {
+          adjusted_probability?: number;
+          rationale?: string | null;
+          evidence_checklist?: Prediction["evidence_checklist"];
+        };
+        setSimulated((prev) => {
+          // Preserve the user's "已取证 / 待补" toggles when the server returns
+          // the same checklist shape — the backend regenerates the list purely
+          // from case_type + role + score, so it doesn't know which boxes the
+          // user just ticked.
+          const currentChecklist = (prev ?? activePrediction).evidence_checklist ?? [];
+          const serverChecklist = sim.evidence_checklist ?? [];
+          const mergedChecklist = serverChecklist.length === currentChecklist.length
+            ? serverChecklist.map((item, i) => ({ ...item, secured: currentChecklist[i]?.secured ?? item.secured }))
+            : serverChecklist.length
+              ? serverChecklist
+              : currentChecklist;
+          return {
+            ...activePrediction,
+            win_probability: sim.adjusted_probability ?? sim.win_probability,
+            risk_level: sim.risk_level ?? activePrediction.risk_level,
+            headline: sim.headline ?? activePrediction.headline,
+            rationale: sim.rationale ?? activePrediction.rationale,
+            evidence_checklist: mergedChecklist,
+            money_low: sim.money_low ?? activePrediction.money_low,
+            money_high: sim.money_high ?? activePrediction.money_high,
+            duration_days_low: sim.duration_days_low ?? activePrediction.duration_days_low,
+            duration_days_high: sim.duration_days_high ?? activePrediction.duration_days_high,
+            strategies: sim.strategies?.length ? sim.strategies : activePrediction.strategies,
+            probability_factors: sim.probability_factors ?? activePrediction.probability_factors,
+          };
         });
       } catch {
         /* silent — slider spam should not surface errors */
@@ -515,27 +538,43 @@ function LitigationInner() {
                 历史案件
               </p>
               <ul className="mt-2 space-y-1">
-                {cases.slice(0, 6).map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => setActiveCaseId(c.id)}
-                      className={
-                        "flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs " +
-                        (c.id === activeCaseId
-                          ? "border-primary-500 bg-primary-50 text-primary-700"
-                          : "border-border bg-surface-elevated text-text-secondary hover:border-primary-500")
-                      }
-                    >
-                      <span className="truncate">{c.title}</span>
-                      {c.prediction && (
-                        <span className="num-display shrink-0 tabular-nums text-primary-600">
-                          {Math.round(c.prediction.win_probability * 100)}%
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                {cases.slice(0, 6).map((c) => {
+                  const isActive = c.id === activeCaseId;
+                  // 激活案件展示 view（含模拟覆盖）的胜率，与 DonutRing
+                  // 保持同步；其他行仍用持久化值，避免误导。
+                  const displayProb = isActive && view
+                    ? view.win_probability
+                    : c.prediction?.win_probability;
+                  const isLive = isActive && !!simulated;
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCaseId(c.id)}
+                        className={
+                          "flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs " +
+                          (isActive
+                            ? "border-primary-500 bg-primary-50 text-primary-700"
+                            : "border-border bg-surface-elevated text-text-secondary hover:border-primary-500")
+                        }
+                      >
+                        <span className="truncate">{c.title}</span>
+                        {displayProb != null && (
+                          <span
+                            className={
+                              "num-display shrink-0 tabular-nums " +
+                              (isLive ? "text-primary-700" : "text-primary-600")
+                            }
+                            title={isLive ? "跟随当前模拟实时更新" : "最近一次 AI 预测结果"}
+                          >
+                            {Math.round(displayProb * 100)}%
+                            {isLive && <span className="ml-0.5 text-[9px] text-primary-500">·实时</span>}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -809,7 +848,13 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
             </Badge>
           )}
         </div>
-        <span className="num-display text-lg tabular-nums text-primary-600">{strategy.score}</span>
+        <span
+          className="flex items-baseline gap-1 text-primary-600"
+          title="策略推荐指数（满分 100），非胜诉率百分比"
+        >
+          <span className="num-display text-lg tabular-nums">{strategy.score}</span>
+          <span className="text-[10px] font-medium text-text-tertiary">推荐指数 /100</span>
+        </span>
       </header>
       <p className="text-xs text-text-secondary">{strategy.rationale}</p>
       <div className="flex items-center gap-3 text-[11px] text-text-tertiary">

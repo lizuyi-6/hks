@@ -18,8 +18,18 @@ from apps.api.app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
+from apps.api.app.services import event_types
+from apps.api.app.services.event_bus import emit_event
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_emit(db: Session, **kwargs) -> None:
+    """Emit an activity event without letting a bus failure break auth."""
+    try:
+        emit_event(db, **kwargs)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception("activity event emit failed event_type=%s", kwargs.get("event_type"))
 
 
 def _slugify(name: str) -> str:
@@ -52,6 +62,20 @@ def register_user(db: Session, payload: RegisterRequest) -> TokenResponse:
         role="owner",
     )
     db.add(user)
+    db.flush()
+    _safe_emit(
+        db,
+        event_type=event_types.USER_REGISTERED,
+        user_id=user.id,
+        tenant_id=tenant.id,
+        source_entity_type="user",
+        source_entity_id=user.id,
+        payload={
+            "title": "账号注册",
+            "detail": f"{user.full_name or user.email} 创建了账号",
+            "email": user.email,
+        },
+    )
     db.commit()
     db.refresh(user)
 
@@ -67,6 +91,19 @@ def login_user(db: Session, payload: LoginRequest) -> TokenResponse:
     token = create_access_token(
         user.id, tenant_id=user.tenant_id, role=user.role or "member"
     )
+    _safe_emit(
+        db,
+        event_type=event_types.USER_LOGIN,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        source_entity_type="user",
+        source_entity_id=user.id,
+        payload={
+            "title": "账号登录",
+            "detail": f"通过邮箱 {user.email} 登录平台",
+        },
+    )
+    db.commit()
     return TokenResponse(access_token=token, token_type="bearer")
 
 
@@ -100,6 +137,18 @@ def change_password(
     if not verify_password(old_password, user.password_hash):
         return False
     user.password_hash = hash_password(new_password)
+    _safe_emit(
+        db,
+        event_type=event_types.AUTH_PASSWORD_CHANGED,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        source_entity_type="user",
+        source_entity_id=user.id,
+        payload={
+            "title": "修改登录密码",
+            "detail": "账号密码已更新",
+        },
+    )
     db.commit()
     return True
 
@@ -110,6 +159,19 @@ def request_password_reset(db: Session, payload: ForgotPasswordRequest) -> str |
         return None
     token = create_password_reset_token(user.id)
     logger.info("Password reset token issued for user_id=%s", user.id)
+    _safe_emit(
+        db,
+        event_type=event_types.AUTH_PASSWORD_RESET_REQUESTED,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        source_entity_type="user",
+        source_entity_id=user.id,
+        payload={
+            "title": "申请重置密码",
+            "detail": f"邮箱 {user.email} 发起了密码重置",
+        },
+    )
+    db.commit()
     return token
 
 
@@ -130,5 +192,17 @@ def reset_password(db: Session, token: str, new_password: str) -> bool:
         return False
 
     user.password_hash = hash_password(new_password)
+    _safe_emit(
+        db,
+        event_type=event_types.AUTH_PASSWORD_RESET,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        source_entity_type="user",
+        source_entity_id=user.id,
+        payload={
+            "title": "完成密码重置",
+            "detail": "已通过重置链接更新密码",
+        },
+    )
     db.commit()
     return True

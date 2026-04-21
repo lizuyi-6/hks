@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.database import get_db
 from apps.api.app.db.models import IpAsset, ReminderTask
 from apps.api.app.schemas.assets import AssetCreateRequest, AssetResponse
+from apps.api.app.services import event_types
 from apps.api.app.services.dependencies import TenantContext, get_current_tenant
+from apps.api.app.services.event_bus import emit_event
 from apps.api.app.services.jobs import _schedule_asset_reminders
 
 
@@ -84,6 +86,24 @@ def create_asset(
     db.add(asset)
     db.commit()
     db.refresh(asset)
+    try:
+        emit_event(
+            db,
+            event_type=event_types.ASSET_CREATED,
+            user_id=ctx.user.id,
+            tenant_id=ctx.tenant.id if ctx.tenant else None,
+            source_entity_type="ip_asset",
+            source_entity_id=asset.id,
+            payload={
+                "title": "登记 IP 资产",
+                "detail": f"新增 {asset.asset_type}：{asset.name}",
+                "assetType": asset.asset_type,
+                "assetName": asset.name,
+            },
+        )
+        db.commit()
+    except Exception:
+        logger.exception("asset.created emit failed asset=%s", asset.id)
     # Reminder scheduling is best-effort: the asset row has already been
     # committed so a secondary failure here must not surface as a 500, or the
     # UI will believe the create failed and refresh into a stale view.
@@ -148,7 +168,27 @@ def delete_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
 
+    asset_name = asset.name
+    asset_type = asset.asset_type
     db.query(ReminderTask).filter(ReminderTask.asset_id == asset_id).delete()
     db.delete(asset)
     db.commit()
+    try:
+        emit_event(
+            db,
+            event_type=event_types.ASSET_DELETED,
+            user_id=ctx.user.id,
+            tenant_id=ctx.tenant.id if ctx.tenant else None,
+            source_entity_type="ip_asset",
+            source_entity_id=asset_id,
+            payload={
+                "title": "删除 IP 资产",
+                "detail": f"移除 {asset_type}：{asset_name}",
+                "assetType": asset_type,
+                "assetName": asset_name,
+            },
+        )
+        db.commit()
+    except Exception:
+        logger.exception("asset.deleted emit failed asset=%s", asset_id)
     return {"ok": True}

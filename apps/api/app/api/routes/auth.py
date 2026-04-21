@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from apps.api.app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from apps.api.app.services import event_types
 from apps.api.app.services.auth import (
     change_password,
     login_user,
@@ -19,7 +22,10 @@ from apps.api.app.services.auth import (
     request_password_reset,
     reset_password,
 )
-from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.dependencies import get_current_user, try_current_user
+from apps.api.app.services.event_bus import emit_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,7 +47,27 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout():
+def logout(
+    user=Depends(try_current_user),
+    db: Session = Depends(get_db),
+):
+    if user is not None:
+        try:
+            emit_event(
+                db,
+                event_type=event_types.USER_LOGOUT,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                source_entity_type="user",
+                source_entity_id=user.id,
+                payload={
+                    "title": "账号登出",
+                    "detail": f"{user.email} 退出登录",
+                },
+            )
+            db.commit()
+        except Exception:  # pragma: no cover — defensive
+            logger.exception("logout event emit failed user_id=%s", user.id)
     return {"ok": True}
 
 

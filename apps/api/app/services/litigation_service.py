@@ -23,6 +23,7 @@ from apps.api.app.db.models import (
     LitigationScenario,
     User,
 )
+from apps.api.app.services import event_types
 from apps.api.app.services.event_bus import emit_event
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,23 @@ def create_case(db: Session, *, user: User, payload: dict[str, Any]) -> Litigati
     )
     db.add(case)
     db.flush()
+    try:
+        emit_event(
+            db,
+            event_type=event_types.LITIGATION_CASE_CREATED,
+            user_id=user.id,
+            tenant_id=getattr(user, "tenant_id", None),
+            source_entity_type="litigation_case",
+            source_entity_id=case.id,
+            payload={
+                "title": "建立诉讼案件",
+                "detail": f"{case.title}（{case.case_type} · {case.role}）",
+                "case_type": case.case_type,
+                "role": case.role,
+            },
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception("litigation.case_created emit failed case=%s", case.id)
     return case
 
 
@@ -254,6 +272,12 @@ def simulate_scenario(
         "duration_days_high": data.get("duration_days_high"),
         "strategies": data.get("strategies") or [],
         "probability_factors": data.get("probability_factors") or [],
+        # 胜率页面的文字描述、证据清单、来源模式需随模拟同步刷新，
+        # 否则前端只会一直复用持久化的 rationale，text 不会变。
+        "rationale": data.get("rationale"),
+        "evidence_checklist": data.get("evidence_checklist") or [],
+        "precedents_source_count": data.get("precedents_source_count"),
+        "source_mode": envelope.mode if hasattr(envelope, "mode") else data.get("source_mode"),
         "overrides": overrides or {},
     }
 

@@ -32,13 +32,23 @@ class TrademarkSearchPort(BasePortAdapter, ABC):
 
 class EnterpriseLookupPort(BasePortAdapter, ABC):
     @abstractmethod
-    def lookup(self, company_name: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+    def lookup(
+        self,
+        company_name: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
 
 class PublicWebSearchPort(BasePortAdapter, ABC):
     @abstractmethod
-    def search(self, query: str, trace_id: str) -> DataSourceEnvelope[list[dict[str, Any]]]:
+    def search(
+        self,
+        query: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ) -> DataSourceEnvelope[list[dict[str, Any]]]:
         raise NotImplementedError
 
 
@@ -55,6 +65,7 @@ class LLMPort(BasePortAdapter, ABC):
         payload: DiagnosisRequest,
         knowledge: dict[str, Any],
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> DataSourceEnvelope[DiagnosisResult]:
         raise NotImplementedError
 
@@ -63,6 +74,7 @@ class LLMPort(BasePortAdapter, ABC):
         self,
         payload: ApplicationDraftRequest,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
@@ -72,6 +84,7 @@ class LLMPort(BasePortAdapter, ABC):
         system_prompt: str,
         user_prompt: str,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
@@ -81,6 +94,7 @@ class LLMPort(BasePortAdapter, ABC):
         payload: DiagnosisRequest,
         knowledge: dict[str, Any],
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         raise NotImplementedError
 
@@ -89,6 +103,7 @@ class LLMPort(BasePortAdapter, ABC):
         self,
         payload: ApplicationDraftRequest,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         raise NotImplementedError
 
@@ -98,6 +113,7 @@ class LLMPort(BasePortAdapter, ABC):
         system_prompt: str,
         user_prompt: str,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         raise NotImplementedError
 
@@ -108,6 +124,7 @@ class LLMPort(BasePortAdapter, ABC):
         tools: list[dict],
         system_prompt: str,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         raise NotImplementedError
 
@@ -125,13 +142,25 @@ class DocumentRenderPort(BasePortAdapter, ABC):
 
 class NotificationPort(BasePortAdapter, ABC):
     @abstractmethod
-    def send_email(self, to_email: str, subject: str, body: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+    def send_email(
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
 
 class MonitoringPort(BasePortAdapter, ABC):
     @abstractmethod
-    def scan(self, query: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+    def scan(
+        self,
+        query: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -141,7 +170,12 @@ class MonitoringPort(BasePortAdapter, ABC):
 
 class CompetitorPort(BasePortAdapter, ABC):
     @abstractmethod
-    def track(self, company_name: str, trace_id: str) -> DataSourceEnvelope[dict[str, Any]]:
+    def track(
+        self,
+        company_name: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ) -> DataSourceEnvelope[dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod

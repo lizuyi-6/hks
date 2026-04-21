@@ -23,18 +23,54 @@ class RealPublicWebSearchAdapter(PublicWebSearchPort):
     def availability(self) -> tuple[bool, str | None]:
         if self.settings.bing_search_api_key:
             return True, None
-        return True, "fallback: no BING_SEARCH_API_KEY, using DuckDuckGo search"
+        # DB rows may still satisfy the request at call time; we can't
+        # know here (availability() has no tenant context) so we just
+        # flag that the env layer is empty.
+        return True, (
+            "fallback: no BING_SEARCH_API_KEY and no global "
+            "provider_integrations(bing_search) row; will use DuckDuckGo "
+            "unless a tenant-scoped integration exists at call time"
+        )
 
-    def search(self, query: str, trace_id: str):
-        if self.settings.bing_search_api_key:
-            return self._search_bing(query, trace_id)
+    def search(self, query: str, trace_id: str, tenant_id: str | None = None):
+        cfg = self._resolve_config(tenant_id)
+        if cfg is not None:
+            return self._search_bing(query, trace_id, cfg)
         return self._search_duckduckgo(query, trace_id)
 
-    def _search_bing(self, query: str, trace_id: str):
+    def _resolve_config(self, tenant_id: str | None) -> dict | None:
+        """Look up effective Bing config (DB → .env) for this call."""
+        # Imported lazily so the registry can be constructed without a
+        # live DB (e.g. during module import in CLI / tests that don't
+        # touch the monitoring path).
+        from apps.api.app.core.database import SessionLocal
+        from apps.api.app.db.repositories.integrations import resolve_integration
+
+        db = SessionLocal()
         try:
-            endpoint = self.settings.bing_search_endpoint
-            headers = {"Ocp-Apim-Subscription-Key": self.settings.bing_search_api_key}
-            params = {"q": query, "count": 10, "mkt": "zh-CN", "setLang": "zh-Hans"}
+            return resolve_integration(db, tenant_id, "bing_search", self.settings)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "public_web_search.bing.resolve_failed tenant=%s error=%s",
+                tenant_id,
+                exc,
+            )
+            return None
+        finally:
+            db.close()
+
+    def _search_bing(self, query: str, trace_id: str, cfg: dict):
+        try:
+            config = cfg.get("config", {}) or {}
+            secrets = cfg.get("secrets", {}) or {}
+            endpoint = config.get("endpoint") or "https://api.bing.microsoft.com/v7.0/search"
+            headers = {"Ocp-Apim-Subscription-Key": secrets.get("api_key", "")}
+            params = {
+                "q": query,
+                "count": 10,
+                "mkt": config.get("market", "zh-CN"),
+                "setLang": config.get("set_lang", "zh-Hans"),
+            }
 
             with httpx.Client(timeout=15) as client:
                 response = client.get(endpoint, headers=headers, params=params)
@@ -49,6 +85,7 @@ class RealPublicWebSearchAdapter(PublicWebSearchPort):
                     "snippet": item.get("snippet", ""),
                 })
 
+            note = f"查询: {query} · 凭证: {cfg.get('source', 'db')}"
             return make_envelope(
                 mode=self.mode,
                 provider=self.provider_name,
@@ -56,7 +93,7 @@ class RealPublicWebSearchAdapter(PublicWebSearchPort):
                 source_refs=[
                     SourceRef(
                         title="Bing Web Search",
-                        note=f"查询: {query}",
+                        note=note,
                     )
                 ],
                 disclaimer="搜索结果来源于 Bing，仅供参考。",
@@ -142,12 +179,12 @@ class RealPublicWebSearchAdapter(PublicWebSearchPort):
             provider="placeholder",
             trace_id=trace_id,
             source_refs=[SourceRef(title="公开搜索", note=query)],
-            disclaimer="未配置搜索 API，返回示例结果。配置 BING_SEARCH_API_KEY 后可获取真实搜索数据。",
+            disclaimer="未配置搜索 API，返回示例结果。在企业工作台「集成配置」中登记 Bing Search 凭证，或设置 BING_SEARCH_API_KEY 环境变量后可获取真实搜索数据。",
             normalized_payload={
                 "query": query,
                 "result_count": 2,
                 "results": [
-                    {"title": f"搜索结果示例 - {query}", "url": "https://example.com", "snippet": "请配置 BING_SEARCH_API_KEY 以获取真实搜索结果。"},
+                    {"title": f"搜索结果示例 - {query}", "url": "https://example.com", "snippet": "请在「集成配置」中登记 Bing Search 凭证以获取真实搜索结果。"},
                     {"title": "相关资讯示例", "url": "https://example.com/news", "snippet": "此处展示示例数据。"},
                 ],
             },

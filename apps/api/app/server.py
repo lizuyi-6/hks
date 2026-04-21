@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from sqlalchemy import inspect, text
 
 from apps.api.app.api.routes import (
+    agent_proactive,
     analytics,
     assets,
     auth,
@@ -13,6 +14,7 @@ from apps.api.app.api.routes import (
     compliance,
     consultations,
     diagnosis,
+    integrations,
     jobs,
     leads,
     litigation,
@@ -88,6 +90,14 @@ def _lightweight_migrate() -> None:
             "ALTER TABLE legal_service_providers ADD COLUMN tag_vec_updated_at DATETIME",
             "ALTER TABLE legal_service_providers ADD COLUMN IF NOT EXISTS tag_vec_updated_at TIMESTAMPTZ",
         ),
+        (
+            # 企业合规评分的 AI 一句话诊断（替换 DonutRing 下方冗余的 label 数字）。
+            # 老库里没有这一列，缺了就直接跑 SELECT * 会崩。
+            "compliance_profiles",
+            "ai_summary",
+            "ALTER TABLE compliance_profiles ADD COLUMN ai_summary TEXT",
+            "ALTER TABLE compliance_profiles ADD COLUMN IF NOT EXISTS ai_summary TEXT",
+        ),
     ]
 
     with engine.begin() as conn:
@@ -152,6 +162,7 @@ app.include_router(notifications.router)
 app.include_router(notifications_stream.router)
 app.include_router(automation.router)
 app.include_router(chat.router)
+app.include_router(agent_proactive.router)
 app.include_router(matching.router)
 app.include_router(providers.router)
 app.include_router(leads.router)
@@ -159,3 +170,4 @@ app.include_router(orders.router)
 app.include_router(consultations.router)
 app.include_router(compliance.router)
 app.include_router(litigation.router)
+app.include_router(integrations.router)

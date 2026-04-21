@@ -23,17 +23,44 @@ class RealEnterpriseLookupAdapter(EnterpriseLookupPort):
     def availability(self) -> tuple[bool, str | None]:
         if self.settings.tianyancha_api_key:
             return True, None
-        return True, "fallback: no TIANAYANCHA_API_KEY, returning basic info"
+        return True, (
+            "fallback: TIANAYANCHA_API_KEY/provider_integrations(tianyancha) "
+            "unset — returning basic info unless tenant has an integration"
+        )
 
-    def lookup(self, company_name: str, trace_id: str):
-        if self.settings.tianyancha_api_key:
-            return self._lookup_tianyancha(company_name, trace_id)
+    def _resolve_cfg(self, tenant_id: str | None) -> dict | None:
+        from apps.api.app.core.database import SessionLocal
+        from apps.api.app.db.repositories.integrations import resolve_integration
+
+        db = SessionLocal()
+        try:
+            return resolve_integration(db, tenant_id, "tianyancha", self.settings)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "enterprise_lookup.tianyancha.resolve_failed tenant=%s error=%s",
+                tenant_id,
+                exc,
+            )
+            return None
+        finally:
+            db.close()
+
+    def lookup(
+        self,
+        company_name: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
+        cfg = self._resolve_cfg(tenant_id)
+        if cfg and cfg.get("secrets", {}).get("api_key"):
+            return self._lookup_tianyancha(company_name, trace_id, cfg)
         return self._lookup_basic(company_name, trace_id)
 
-    def _lookup_tianyancha(self, company_name: str, trace_id: str):
+    def _lookup_tianyancha(self, company_name: str, trace_id: str, cfg: dict):
         try:
+            api_key = cfg["secrets"]["api_key"]
             url = "https://open.api.tianyancha.com/services/open/search/2.0"
-            headers = {"Authorization": self.settings.tianyancha_api_key}
+            headers = {"Authorization": api_key}
             params = {"keyword": company_name, "pageSize": 5}
 
             with httpx.Client(timeout=15) as client:

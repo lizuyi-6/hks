@@ -20,6 +20,7 @@ import {
   type Accent,
 } from "./primitives";
 import { ErrorDisplay, request } from "./shared";
+import { DailyBriefingCard } from "@/components/agent/daily-briefing-card";
 
 // 7 支柱主入口 — 赛道叙事的核心漏斗
 const pillarActions: Array<{
@@ -178,6 +179,9 @@ export function DashboardPanel() {
         icon="dashboard"
         description="七大能力支柱：需求画像 · 智能匹配 · 场景化推送 · 精准获客 · 智能咨询 · 合规 SaaS · 服务数字化"
       />
+
+      {/* AI 每日简报卡 — 复用 proactive.dashboard.daily_briefing 规则 */}
+      <DailyBriefingCard />
 
       {/* 7 支柱主入口 — 赛道叙事核心 */}
       <section className="space-y-3">

@@ -10,7 +10,9 @@ from apps.api.app.db.models import User
 from apps.api.app.schemas.matching import (
     MatchingRunRequest,
 )
+from apps.api.app.services import event_types
 from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.event_bus import emit_event
 from apps.api.app.services.matching_engine import (
     get_matching_detail,
     list_matching_requests,
@@ -33,6 +35,24 @@ def run_match(
 
     request, candidates = run_matching(db, user, payload.raw_query.strip(), top_k=payload.top_k)
     detail = get_matching_detail(db, user.id, request.id) or {"candidates": []}
+    try:
+        emit_event(
+            db,
+            event_type=event_types.MATCHING_REQUESTED,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            source_entity_type="matching_request",
+            source_entity_id=request.id,
+            payload={
+                "title": "发起律师/服务商匹配",
+                "detail": (request.raw_query or "")[:120],
+                "intentCategory": request.intent_category,
+                "candidateCount": len(detail.get("candidates", []) or []),
+            },
+        )
+        db.commit()
+    except Exception:  # pragma: no cover — defensive
+        logger.exception("matching.requested emit failed request_id=%s", request.id)
     return {
         "requestId": request.id,
         "fingerprint": {

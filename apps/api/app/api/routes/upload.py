@@ -5,19 +5,37 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, UploadFile
+from sqlalchemy.orm import Session
 
+from apps.api.app.core.database import get_db
 from apps.api.app.core.file_parser import ALLOWED_EXTENSIONS, MAX_FILE_SIZE, extract_text
+from apps.api.app.services import event_types
 from apps.api.app.services.dependencies import get_current_user
+from apps.api.app.services.event_bus import emit_event
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 
+def _emit_activity(db: Session, user, **kwargs) -> None:
+    try:
+        emit_event(
+            db,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            **kwargs,
+        )
+        db.commit()
+    except Exception:  # pragma: no cover — defensive
+        logger.exception("upload activity event emit failed user_id=%s", getattr(user, "id", None))
+
+
 @router.post("/extract-text")
 async def extract_text_from_file(
     file: UploadFile,
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     filename = file.filename or "unknown.txt"
     content = await file.read()
@@ -30,13 +48,28 @@ async def extract_text_from_file(
         return {"text": "", "filename": filename, "charCount": 0, "error": f"不支持的格式 {ext}，请上传 PDF/DOCX/TXT"}
 
     text = extract_text(content, filename)
+    _emit_activity(
+        db,
+        user,
+        event_type=event_types.FILE_UPLOADED,
+        source_entity_type="file",
+        source_entity_id=filename,
+        payload={
+            "title": "上传文件",
+            "detail": f"解析 {filename}（{len(text)} 字）",
+            "filename": filename,
+            "charCount": len(text),
+            "purpose": "extract_text",
+        },
+    )
     return {"text": text, "filename": filename, "charCount": len(text)}
 
 
 @router.post("/parse-business-license")
 async def parse_business_license(
     file: UploadFile,
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     filename = file.filename or "unknown"
     content = await file.read()
@@ -78,4 +111,18 @@ async def parse_business_license(
         logger.warning("LLM license parsing failed: %s", exc)
         fields = {}
 
+    business_name = fields.get("businessName") if isinstance(fields, dict) else None
+    _emit_activity(
+        db,
+        user,
+        event_type=event_types.LICENSE_PARSED,
+        source_entity_type="file",
+        source_entity_id=filename,
+        payload={
+            "title": "解析营业执照",
+            "detail": f"已识别企业：{business_name}" if business_name else f"解析 {filename} 完成",
+            "filename": filename,
+            "businessName": business_name,
+        },
+    )
     return {"fields": fields, "filename": filename, "extractedCharCount": len(text)}

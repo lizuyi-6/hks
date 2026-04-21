@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -225,6 +225,55 @@ class MonitoringWatchlist(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ProviderIntegration(Base):
+    """Per-tenant encrypted credentials for external providers.
+
+    Covers all currently-integrated third parties in one table:
+
+    - ``provider_key`` ∈ {``bing_search``, ``tianyancha``, ``doubao_llm``, ``smtp``}.
+    - ``secrets_ciphertext`` is a Fernet token whose plaintext JSON shape
+      varies per provider — e.g. ``{"api_key": "..."}`` for Bing/天眼查/豆包
+      and ``{"password": "..."}`` for SMTP.
+    - ``config`` holds non-sensitive settings (endpoint, market, smtp host,
+      model name, etc.) — safe to expose to tenant admins.
+    - ``key_hint`` is the UI-safe preview (``sk_…abcd``) so the list view
+      never has to touch ciphertext.
+    - ``tenant_id IS NULL`` means the "global default" row (env migration
+      fallback). Resolution order is tenant-scoped → global → raw ``.env``.
+    """
+
+    __tablename__ = "provider_integrations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "provider_key", name="uq_integration_tenant_key"
+        ),
+        Index(
+            "ix_integration_tenant_key_active",
+            "tenant_id",
+            "provider_key",
+            "active",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
+    provider_key: Mapped[str] = mapped_column(String(64), index=True)
+    label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    secrets_ciphertext: Mapped[str] = mapped_column(Text)
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    key_hint: Mapped[str] = mapped_column(String(16), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 # ============================================================================
 # A1+ 2.0 — AI Legal Services Operating System
 # ============================================================================
@@ -426,6 +475,10 @@ class ComplianceProfile(Base):
     compliance_score: Mapped[int] = mapped_column(Integer, default=0)
     score_breakdown: Mapped[dict] = mapped_column(JSON, default=dict)
     risk_heatmap: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 一句话 AI 诊断：替换原本 DonutRing 下方冗余的数字小字，
+    # 让 60% 下面不再是另一个 "60"，而是针对当前评分/发现/行业的可读结论。
+    # 由 run_compliance_audit() 在每次体检时生成，LLM 失败时落回规则化文案。
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_audit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_tier: Mapped[str] = mapped_column(String(16), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -598,6 +651,75 @@ class LitigationScenario(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     prediction: Mapped["LitigationPrediction"] = relationship(back_populates="scenarios")
+
+
+# ============================================================================
+# Proactive Copilot — AI 主动副驾（浮窗读页面上下文主动冒泡）
+# ============================================================================
+
+
+class ProactiveSuggestion(Base):
+    """One AI-generated proactive suggestion surfaced to the user.
+
+    Unlike :class:`Notification`, which is a push triggered by a business
+    event, a :class:`ProactiveSuggestion` is produced on demand when the user
+    lands on a page and a ``PROACTIVE_TRIGGERS`` rule matches. The AI then
+    writes the ``title``/``body``/``actions`` tailored to the user's state.
+
+    ``actions_json`` is a list of ``{id, label, tool, params, kind}`` objects
+    where ``tool`` aligns with ``chat_service._execute_action`` action names
+    (e.g. ``compliance_scan`` / ``find_lawyer``). ``kind`` ∈
+    {``primary`` / ``secondary`` / ``navigate``}; ``navigate`` means just
+    open ``params.href`` on the frontend, no server-side side effect.
+    """
+
+    __tablename__ = "proactive_suggestions"
+    __table_args__ = (
+        Index("ix_proactive_user_created", "user_id", "created_at"),
+        Index("ix_proactive_user_rule", "user_id", "rule_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    rule_key: Mapped[str] = mapped_column(String(120), index=True)
+    route: Mapped[str] = mapped_column(String(120))
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actions_json: Mapped[list] = mapped_column(JSON, default=list)
+    context_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    source_mode: Mapped[str] = mapped_column(String(16), default="llm")  # llm / fallback
+    # status: pending / accepted / executed / dismissed / expired
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    feedback: Mapped[str | None] = mapped_column(String(16), nullable=True)  # up / down
+    executed_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    executed_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ProactiveDismissal(Base):
+    """User preference: suppress a proactive rule for a while or forever.
+
+    ``scope`` ∈ {``today`` / ``rule_forever``}. ``once`` dismissals are
+    captured by simply marking the suggestion ``status='dismissed'`` and do
+    not write a row here. ``until_at`` is used for ``today`` scope only.
+    """
+
+    __tablename__ = "proactive_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "rule_key", "scope", name="uq_proactive_dismissal"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    rule_key: Mapped[str] = mapped_column(String(120), index=True)
+    scope: Mapped[str] = mapped_column(String(16), default="today")
+    until_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class LitigationPrecedent(Base):

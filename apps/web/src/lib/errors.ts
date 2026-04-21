@@ -26,7 +26,11 @@ export class ApplicationError extends Error {
     public errorType: ErrorType,
     public errorLocation: string,
     public requestId?: string,
-    public details?: Record<string, unknown>
+    public details?: Record<string, unknown>,
+    // Raw HTTP status, populated when an HTTP response triggered this error.
+    // Exposed so specific UI branches (e.g. "hide admin-only controls on
+    // 403") can discriminate without parsing error messages.
+    public status?: number,
   ) {
     super(message);
     this.name = "ApplicationError";
@@ -103,7 +107,8 @@ export function parseErrorResponse(
         mapStatusToErrorType(data.errorType, text, status),
         data.errorLocation || location,
         data.requestId,
-        structuredDetails
+        structuredDetails,
+        status,
       );
     }
   } catch {
@@ -112,7 +117,10 @@ export function parseErrorResponse(
   return new ApplicationError(
     text || "Request failed",
     mapStatusToErrorType(undefined, text, status),
-    location
+    location,
+    undefined,
+    undefined,
+    status,
   );
 }
 

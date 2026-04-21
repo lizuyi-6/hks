@@ -620,6 +620,7 @@ def _action_create_notification(
                 subject=title,
                 body=body or title,
                 trace_id=notif.id,
+                tenant_id=tenant_id,
             )
         except Exception:
             logger.exception("send_email failed for notification %s", notif.id)

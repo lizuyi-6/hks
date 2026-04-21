@@ -180,12 +180,24 @@ Key vars beyond the obvious DB/Redis URLs:
 | `GENERATED_DIR` | Where rendered documents (PDF/DOCX) are stored; defaults to `apps/api/.generated/` |
 | `KNOWLEDGE_BASE_DIR` | Path to knowledge base files |
 | `WORKER_POLL_INTERVAL` | Worker polling interval in seconds (default 5) |
-| `TIANAYANCHA_API_KEY` | Tianyancha enterprise-lookup API key |
-| `BING_SEARCH_API_KEY` / `BING_SEARCH_ENDPOINT` | Bing web-search API for monitoring |
-| `SMTP_*` | Email notification settings (host, port, username, password, from, use_tls) |
+| `APP_ENCRYPTION_KEY` | **Master Fernet key** for encrypting at-rest provider credentials. Required when `APP_ENV` is not `development`/`test`. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Rotating this key WITHOUT re-encrypting rows will make stored secrets unreadable. |
+| `TIANAYANCHA_API_KEY` | Tianyancha fallback (used only if no `tianyancha` row exists in `provider_integrations`) |
+| `BING_SEARCH_API_KEY` / `BING_SEARCH_ENDPOINT` | Bing search fallback (used only if no `bing_search` row exists) |
+| `DOUBAO_API_KEY` / `DOUBAO_BASE_URL` / `DOUBAO_MODEL` | Doubao LLM fallback (used only if no `doubao_llm` row exists) |
+| `SMTP_*` | SMTP fallback (used only if no `smtp` row exists) |
 | `PROFILE_MATCHING_MODE` | `rules` (default, hybrid rule + embedding rerank) or `embedding` (embedding-only rerank) |
 
-> Note: Doubao LLM credentials (`DOUBAO_API_KEY` / `DOUBAO_BASE_URL` / `DOUBAO_MODEL`) are hardcoded in `apps/api/app/adapters/real/llm.py` — there are no `LLM_*` env vars anymore. Provider mode env vars (`PROVIDER_*_MODE`, `NEXT_PUBLIC_API_MODE`, `PROFILE_LLM_FALLBACK`) have also been removed.
+### Provider credentials — DB-first resolution
+
+External API credentials (Bing Search, Tianyancha, Doubao LLM, SMTP) are no longer read straight from the environment. They live in the `provider_integrations` table as **Fernet-encrypted** rows and are resolved via `apps/api/app/db/repositories/integrations.py::resolve_integration` in this order:
+
+1. **Tenant-scoped row** — `(tenant_id = <caller>, provider_key, active=true)`
+2. **Global row** — `(tenant_id IS NULL, provider_key, active=true)` (seeded by ops for "default" tenants)
+3. **Environment fallback** — the `BING_SEARCH_*` / `TIANAYANCHA_*` / `DOUBAO_*` / `SMTP_*` vars listed above
+
+Tenants manage their own keys in-app via **企业合规中心 → 集成配置** (`apps/web/src/components/workspace/enterprise.tsx` → `IntegrationsTab`). The frontend only ever sees a masked hint (`sk_…abcd`); the plaintext key never leaves the server after upsert. Non-admin tenant users get 403 on writes (see `require_tenant_admin` in `apps/api/app/services/dependencies.py`).
+
+When propagating `tenant_id` through new adapter code, remember: any call into `NotificationPort` / `CompetitorPort` / `EnterpriseLookupPort` / `LLMPort` should pass the caller's `tenant_id` so the correct key is resolved.
 
 ## Testing Notes
 

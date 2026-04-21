@@ -234,9 +234,14 @@ async def _iter_sse_payloads(response: httpx.Response) -> AsyncGenerator[str, No
             yield "\n".join(data_lines)
 
 # ---------------------------------------------------------------------------
-# Hardcoded Doubao (Volcano Ark) connection — do NOT move to env vars.
-# 用户显式要求把 Doubao-Seed-2.0-pro 接入信息硬编码到程序里。
-# OpenAI-compatible endpoint: POST {DOUBAO_BASE_URL}/chat/completions
+# Doubao (Volcano Ark) connection — resolved dynamically.
+#
+# Historical note: we used to hardcode the API key here. It is now stored
+# encrypted in ``provider_integrations(doubao_llm)`` and the constants
+# below only act as the *last-resort* fallback when neither a tenant row
+# nor a global row nor ``.env`` has a value — keeps existing demo
+# deployments working during the migration.
+# OpenAI-compatible endpoint: POST {base_url}/chat/completions
 # ---------------------------------------------------------------------------
 DOUBAO_API_KEY = "7142ce5f-e0c2-4d65-b667-77a13baff76a"
 DOUBAO_BASE_URL = "https://ark.cn-beijing.volces.com/api/coding/v3"
@@ -558,12 +563,45 @@ class _LLMClient:
         yield {"type": "done"}
 
 
-def _build_client() -> _LLMClient:
+def _build_client(tenant_id: str | None = None) -> _LLMClient:
+    """Resolve Doubao credentials at call time and build a client.
+
+    Resolution precedence (delegated to
+    :func:`apps.api.app.db.repositories.integrations.resolve_integration`):
+    tenant row → global row → ``.env`` → hardcoded defaults. The hardcoded
+    defaults live as ``DOUBAO_*`` module constants above.
+    """
+    api_key = DOUBAO_API_KEY
+    base_url = DOUBAO_BASE_URL
+    model = DOUBAO_MODEL
+    try:
+        from apps.api.app.core.config import get_settings
+        from apps.api.app.core.database import SessionLocal
+        from apps.api.app.db.repositories.integrations import resolve_integration
+
+        db = SessionLocal()
+        try:
+            cfg = resolve_integration(db, tenant_id, "doubao_llm", get_settings())
+        finally:
+            db.close()
+        if cfg:
+            secrets = cfg.get("secrets", {}) or {}
+            config = cfg.get("config", {}) or {}
+            api_key = secrets.get("api_key") or api_key
+            base_url = config.get("base_url") or base_url
+            model = config.get("model") or model
+    except Exception as exc:  # pragma: no cover — keep LLM live on DB outage
+        logger.warning(
+            "llm.build_client.resolve_failed tenant=%s error=%s",
+            tenant_id,
+            exc,
+        )
+
     return _LLMClient(
         provider=DOUBAO_PROVIDER,
-        api_key=DOUBAO_API_KEY,
-        base_url=DOUBAO_BASE_URL,
-        model=DOUBAO_MODEL,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
     )
 
 
@@ -670,12 +708,28 @@ class RealLlmAdapter(LLMPort):
     mode = "real"
 
     def __init__(self) -> None:
+        # The default client uses module-level defaults; tenant-scoped
+        # requests rebuild a client via ``_client_for()`` so per-tenant
+        # keys actually reach the wire.
         self._client = _build_client()
+
+    def _client_for(self, tenant_id: str | None) -> _LLMClient:
+        """Return a tenant-scoped client when ``tenant_id`` is present."""
+        if tenant_id is None:
+            return self._client
+        return _build_client(tenant_id)
 
     def availability(self) -> tuple[bool, str | None]:
         return True, None
 
-    def diagnose(self, payload: DiagnosisRequest, knowledge: dict, trace_id: str):
+    def diagnose(
+        self,
+        payload: DiagnosisRequest,
+        knowledge: dict,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
+        client = self._client_for(tenant_id)
         base_prompt = DIAGNOSE_USER_TEMPLATE.format(
             business_name=payload.business_name or "未提供",
             business_description=payload.business_description,
@@ -687,7 +741,7 @@ class RealLlmAdapter(LLMPort):
 
         logger.debug("llm.diagnose.entry trace_id=%s", trace_id)
         try:
-            raw = self._client.chat(DIAGNOSE_SYSTEM_PROMPT, user_prompt)
+            raw = client.chat(DIAGNOSE_SYSTEM_PROMPT, user_prompt)
             parsed = _extract_json(raw)
         except Exception as exc:
             _status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -725,14 +779,20 @@ class RealLlmAdapter(LLMPort):
             source_refs=[
                 SourceRef(
                     title=f"LLM ({self.provider_name})",
-                    note=f"模型 {self._client.model}",
+                    note=f"模型 {client.model}",
                 )
             ],
             disclaimer="诊断结果由 AI 生成，仅供参考，以官方为准。",
             normalized_payload=result,
         )
 
-    def summarize_application(self, payload: ApplicationDraftRequest, trace_id: str):
+    def summarize_application(
+        self,
+        payload: ApplicationDraftRequest,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
+        client = self._client_for(tenant_id)
         user_prompt = APPLICATION_SUMMARY_USER_TEMPLATE.format(
             trademark_name=payload.trademark_name,
             applicant_name=payload.applicant_name,
@@ -742,7 +802,7 @@ class RealLlmAdapter(LLMPort):
         )
 
         try:
-            raw = self._client.chat(APPLICATION_SUMMARY_SYSTEM_PROMPT, user_prompt)
+            raw = client.chat(APPLICATION_SUMMARY_SYSTEM_PROMPT, user_prompt)
             parsed = _extract_json(raw)
         except Exception as exc:
             logger.exception("LLM summarize failed: %s", exc)
@@ -758,7 +818,7 @@ class RealLlmAdapter(LLMPort):
             source_refs=[
                 SourceRef(
                     title=f"LLM ({self.provider_name})",
-                    note=f"模型 {self._client.model}",
+                    note=f"模型 {client.model}",
                 )
             ],
             disclaimer="申请书摘要由 AI 生成，仅供参考，以官方为准。",
@@ -768,9 +828,16 @@ class RealLlmAdapter(LLMPort):
             },
         )
 
-    def analyze_text(self, system_prompt: str, user_prompt: str, trace_id: str):
+    def analyze_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
+        client = self._client_for(tenant_id)
         try:
-            raw = self._client.chat(system_prompt, user_prompt)
+            raw = client.chat(system_prompt, user_prompt)
         except Exception as exc:
             logger.exception("LLM analyze_text failed: %s", exc)
             raise APISystemError(
@@ -790,7 +857,7 @@ class RealLlmAdapter(LLMPort):
             source_refs=[
                 SourceRef(
                     title=f"LLM ({self.provider_name})",
-                    note=f"模型 {self._client.model}",
+                    note=f"模型 {client.model}",
                 )
             ],
             disclaimer="分析结果由 AI 生成，仅供参考。",
@@ -802,9 +869,11 @@ class RealLlmAdapter(LLMPort):
         payload: DiagnosisRequest,
         knowledge: dict[str, Any],
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         from apps.api.app.core.streaming import sse_event
 
+        client = self._client_for(tenant_id)
         base_prompt = DIAGNOSE_USER_TEMPLATE.format(
             business_name=payload.business_name or "未提供",
             business_description=payload.business_description,
@@ -818,7 +887,7 @@ class RealLlmAdapter(LLMPort):
 
         accumulated = ""
         try:
-            async for token in self._client.chat_stream(DIAGNOSE_SYSTEM_PROMPT, user_prompt):
+            async for token in client.chat_stream(DIAGNOSE_SYSTEM_PROMPT, user_prompt):
                 accumulated += token
                 yield sse_event("token", {"content": token})
 
@@ -864,7 +933,7 @@ class RealLlmAdapter(LLMPort):
             mode=self.mode,
             provider=self.provider_name,
             trace_id=trace_id,
-            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {client.model}")],
             disclaimer="诊断结果由 AI 生成，仅供参考，以官方为准。",
             normalized_payload=result,
         )
@@ -874,9 +943,11 @@ class RealLlmAdapter(LLMPort):
         self,
         payload: ApplicationDraftRequest,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         from apps.api.app.core.streaming import sse_event
 
+        client = self._client_for(tenant_id)
         user_prompt = APPLICATION_SUMMARY_USER_TEMPLATE.format(
             trademark_name=payload.trademark_name,
             applicant_name=payload.applicant_name,
@@ -889,7 +960,7 @@ class RealLlmAdapter(LLMPort):
 
         accumulated = ""
         try:
-            async for token in self._client.chat_stream(APPLICATION_SUMMARY_SYSTEM_PROMPT, user_prompt):
+            async for token in client.chat_stream(APPLICATION_SUMMARY_SYSTEM_PROMPT, user_prompt):
                 accumulated += token
                 yield sse_event("token", {"content": token})
 
@@ -910,7 +981,7 @@ class RealLlmAdapter(LLMPort):
             mode=self.mode,
             provider=self.provider_name,
             trace_id=trace_id,
-            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {client.model}")],
             disclaimer="申请书摘要由 AI 生成，仅供参考，以官方为准。",
             normalized_payload={"summary": parsed.get("summary", ""), "highlights": parsed.get("highlights", [])},
         )
@@ -921,14 +992,16 @@ class RealLlmAdapter(LLMPort):
         system_prompt: str,
         user_prompt: str,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         from apps.api.app.core.streaming import sse_event
 
+        client = self._client_for(tenant_id)
         yield sse_event("meta", {"traceId": trace_id, "provider": self.provider_name, "mode": self.mode})
 
         accumulated = ""
         try:
-            async for token in self._client.chat_stream(system_prompt, user_prompt):
+            async for token in client.chat_stream(system_prompt, user_prompt):
                 accumulated += token
                 yield sse_event("token", {"content": token})
         except Exception as exc:
@@ -952,7 +1025,7 @@ class RealLlmAdapter(LLMPort):
             mode=self.mode,
             provider=self.provider_name,
             trace_id=trace_id,
-            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {self._client.model}")],
+            source_refs=[SourceRef(title=f"LLM ({self.provider_name})", note=f"模型 {client.model}")],
             disclaimer="分析结果由 AI 生成，仅供参考。",
             normalized_payload=parsed,
         )
@@ -964,12 +1037,14 @@ class RealLlmAdapter(LLMPort):
         tools: list[dict],
         system_prompt: str,
         trace_id: str,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
+        client = self._client_for(tenant_id)
         yield {"type": "meta", "provider": self.provider_name, "mode": self.mode, "traceId": trace_id}
 
         full_messages = [{"role": "system", "content": system_prompt}] + messages
         try:
-            async for event in self._client.multi_turn_chat(full_messages, tools):
+            async for event in client.multi_turn_chat(full_messages, tools):
                 yield event
         except Exception as exc:
             _status = getattr(getattr(exc, "response", None), "status_code", None)

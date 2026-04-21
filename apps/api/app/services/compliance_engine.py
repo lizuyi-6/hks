@@ -230,6 +230,16 @@ def run_compliance_audit(
         "by_type": _count_assets(assets),
     }
     profile.last_audit_at = datetime.now(timezone.utc)
+    # 生成 AI 一句话诊断（替换前端 DonutRing 下方原本多余的 "60" 小字）。
+    # LLM 失败或未配置时自动落回规则化文案，保证 UI 永远有可读结论。
+    profile.ai_summary = _build_ai_summary(
+        company_name=profile.company_name,
+        industry=profile.industry,
+        scale=profile.scale,
+        score=profile.compliance_score,
+        findings=result.get("findings", []) or [],
+        heatmap=profile.risk_heatmap or {},
+    )
 
     # 合规体检完成 → 发事件给场景推送规则 scenario.compliance_score_low
     try:
@@ -265,9 +275,162 @@ def run_compliance_audit(
         "breakdown": profile.score_breakdown,
         "heatmap": profile.risk_heatmap,
         "summary": result.get("summary"),
+        "aiSummary": profile.ai_summary,
         "findings": result.get("findings", []),
         "asset_summary": profile.asset_summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# AI 诊断文案（替换 DonutRing 下方冗余的数字 label）
+# ---------------------------------------------------------------------------
+
+
+_HEATMAP_LABEL_CN = {
+    "brand_protection": "品牌保护",
+    "technology_protection": "技术保护",
+    "software_copyright": "软件版权",
+    "contract_hygiene": "合同健康",
+    "policy_awareness": "政策敏感度",
+}
+
+
+def _build_ai_summary(
+    *,
+    company_name: str | None,
+    industry: str | None,
+    scale: str | None,
+    score: int,
+    findings: list[dict[str, Any]],
+    heatmap: dict[str, int],
+) -> str:
+    """返回一句话 (≤60 字) 的合规健康诊断。
+
+    优先调用 LLM 生成“分析 + 下一步建议”的自然语言结论；LLM 不可用 / 超时 /
+    返回空时落回规则化文案，保证前端 UI 永远有可渲染的文本。
+    """
+    high = [f for f in findings if (f or {}).get("severity") in ("high", "critical", "red")]
+    medium = [f for f in findings if (f or {}).get("severity") in ("medium", "warn", "amber")]
+    weakest = _weakest_dimension(heatmap)
+
+    rule_based = _rule_based_ai_summary(
+        score=score, high=len(high), medium=len(medium), weakest=weakest, industry=industry
+    )
+
+    try:
+        llm = provider_registry.get("llm")
+    except Exception:  # pragma: no cover — registry may not have LLM wired
+        return rule_based
+    if llm is None:  # pragma: no cover — defensive
+        return rule_based
+
+    try:
+        user_prompt = _format_llm_prompt(
+            company_name=company_name,
+            industry=industry,
+            scale=scale,
+            score=score,
+            findings=findings,
+            heatmap=heatmap,
+            weakest=weakest,
+        )
+        system_prompt = (
+            "你是一位 IP 合规分析师。请基于给定的企业合规体检数据输出"
+            "一句不超过 60 个汉字的结论，要求："
+            "1) 指出当前总体健康度；"
+            "2) 点出最需要关注的一个维度或风险；"
+            "3) 给出一个可执行的下一步建议；"
+            "不要分点、不要 Markdown、不要出现分数数字、不要加引号。"
+        )
+        text = llm.chat(system_prompt, user_prompt) or ""
+    except Exception:
+        logger.info("compliance.ai_summary.llm_failed — falling back to rule text", exc_info=True)
+        return rule_based
+
+    text = text.strip().strip('"“”\'`').replace("\n", " ")
+    if not text:
+        return rule_based
+    if len(text) > 80:
+        text = text[:78].rstrip("，,.;；、 ") + "…"
+    return text
+
+
+def _weakest_dimension(heatmap: dict[str, int]) -> tuple[str, int] | None:
+    if not heatmap:
+        return None
+    try:
+        key, value = min(heatmap.items(), key=lambda kv: int(kv[1] or 0))
+    except Exception:  # pragma: no cover — defensive
+        return None
+    return _HEATMAP_LABEL_CN.get(key, key), int(value or 0)
+
+
+def _rule_based_ai_summary(
+    *,
+    score: int,
+    high: int,
+    medium: int,
+    weakest: tuple[str, int] | None,
+    industry: str | None,
+) -> str:
+    """确定性兜底：无 LLM 时也能给出“有营养”的一句话结论。"""
+    if score >= 85:
+        health = "整体健康度良好"
+    elif score >= 70:
+        health = "整体达标但仍有短板"
+    elif score >= 50:
+        health = "多项指标承压"
+    else:
+        health = "合规风险较高"
+
+    focus = ""
+    if weakest is not None:
+        dim, val = weakest
+        focus = f"，其中{dim}仅 {val} 分需优先加固"
+
+    if high:
+        action = f"；建议先处理 {high} 项高风险问题"
+    elif medium:
+        action = f"；建议尽快清理 {medium} 项中等风险"
+    else:
+        action = "；可按季度复检并持续积累资产"
+
+    prefix = f"{industry}行业" if industry else "当前档案"
+    return f"{prefix}{health}{focus}{action}。"
+
+
+def _format_llm_prompt(
+    *,
+    company_name: str | None,
+    industry: str | None,
+    scale: str | None,
+    score: int,
+    findings: list[dict[str, Any]],
+    heatmap: dict[str, int],
+    weakest: tuple[str, int] | None,
+) -> str:
+    lines: list[str] = [
+        f"企业名称: {company_name or '未提供'}",
+        f"行业: {industry or '未提供'}",
+        f"规模: {scale or '未提供'}",
+        f"综合合规分: {score}/100",
+    ]
+    if heatmap:
+        hm_str = "、".join(
+            f"{_HEATMAP_LABEL_CN.get(k, k)}={v}" for k, v in heatmap.items()
+        )
+        lines.append(f"风险热力图: {hm_str}")
+    if weakest is not None:
+        dim, val = weakest
+        lines.append(f"当前最薄弱维度: {dim}（{val} 分）")
+    if findings:
+        preview = "; ".join(
+            f"[{f.get('severity','?')}] {f.get('title') or f.get('category') or ''}"
+            for f in findings[:5]
+        )
+        lines.append(f"Top 发现项: {preview}")
+        lines.append(f"发现项总数: {len(findings)}")
+    return "\n".join(lines)
 
 
 def _count_assets(assets: list[IpAsset]) -> dict[str, int]:
@@ -353,6 +516,9 @@ def profile_to_dict(db: Session, profile: ComplianceProfile) -> dict[str, Any]:
         "breakdown": profile.score_breakdown or {},
         "heatmap": profile.risk_heatmap or {},
         "assetSummary": profile.asset_summary or {},
+        # 前端 DonutRing 下方展示的一句话 AI 诊断。老档案（体检前）可能为 None，
+        # UI 会自动回退到按评分分级的模板文案。
+        "aiSummary": profile.ai_summary,
         "subscriptionTier": profile.subscription_tier,
         "subscription": {
             **tier_cfg,

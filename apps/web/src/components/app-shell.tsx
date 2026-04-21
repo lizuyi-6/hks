@@ -424,8 +424,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         })}
       </nav>
 
-      {/* ===== AI Agent floating entrypoint (hidden on /consult to avoid duplicating input) ===== */}
-      <FloatingAgent hidden={pathname.startsWith("/consult")} />
+      {/* ===== AI Agent floating entrypoint (主动副驾; 仍渲染在 /consult 上以支持 consult.* 主动规则) ===== */}
+      <FloatingAgent />
     </div>
   );
 }

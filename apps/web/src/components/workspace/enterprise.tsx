@@ -22,9 +22,16 @@ import { DonutRing } from "@/components/viz";
 import { ErrorDisplay, request, type Envelope } from "./shared";
 import { ApplicationError } from "@/lib/errors";
 import { fetchSSE } from "@/lib/sse";
+import { useSetPageResource } from "@/lib/use-page-context";
 import { INDUSTRY_CHIPS } from "@/components/modules";
+import {
+  IntegrationForm,
+  type IntegrationFormValues,
+  type IntegrationSummary,
+  type ProviderSchema,
+} from "./integrations-form";
 
-type Tab = "overview" | "audit" | "policy" | "subscription";
+type Tab = "overview" | "audit" | "policy" | "subscription" | "integrations";
 
 type Finding = {
   id: string;
@@ -50,6 +57,9 @@ type ComplianceProfile = {
   lastAuditAt?: string | null;
   findings: Finding[];
   createdAt: string;
+  // 一句话 AI 诊断，替换 DonutRing 下方原本冗余的 "{score}" 小字。
+  // 后端 `/compliance/profile` 会下发；老档案或体检前为 null，UI 自动回退模板文案。
+  aiSummary?: string | null;
 };
 
 type PolicyItem = {
@@ -116,6 +126,7 @@ export function EnterpriseSpace() {
           { key: "audit", label: "体检报告", icon: "diagnosis" },
           { key: "policy", label: "政策雷达", icon: "policies" },
           { key: "subscription", label: "订阅方案", icon: "sparkle" },
+          { key: "integrations", label: "集成配置", icon: "lock" },
         ]}
         active={tab}
         onChange={setTab}
@@ -125,6 +136,7 @@ export function EnterpriseSpace() {
       {tab === "audit" && <AuditTab />}
       {tab === "policy" && <PolicyTab onGoSubscription={() => setTab("subscription")} />}
       {tab === "subscription" && <SubscriptionTab />}
+      {tab === "integrations" && <IntegrationsTab />}
     </div>
   );
 }
@@ -187,6 +199,10 @@ function Overview({ onGoSubscription }: { onGoSubscription?: () => void }) {
   const [error, setError] = useState<string | ApplicationError | null>(null);
   const [running, setRunning] = useState(false);
   const [justRefreshedAt, setJustRefreshedAt] = useState<number | null>(null);
+
+  useSetPageResource(
+    profile?.id ? { type: "compliance_profile", id: profile.id } : null,
+  );
 
   const load = useCallback(async () => {
     try {
@@ -331,21 +347,28 @@ function Overview({ onGoSubscription }: { onGoSubscription?: () => void }) {
         <div className="flex flex-col items-center rounded-xl border border-border bg-surface p-6">
           <DonutRing
             percent={profile.score}
-            label={`${profile.score}`}
             color={scoreColor}
             size={140}
             strokeWidth={14}
           />
           <div className="mt-3 text-center">
             <p className="text-[11px] uppercase tracking-wider text-text-tertiary">
-              合规评分
+              合规评分 · AI 诊断
             </p>
-            <p className="mt-1 text-sm text-text-secondary">
-              {profile.score >= 80
-                ? "良好 · 继续保持"
-                : profile.score >= 60
-                  ? "达标 · 有改进空间"
-                  : "存在风险 · 建议立即介入"}
+            {/*
+              旧实现是 `label={`${profile.score}`}` + 一行模板化的 "达标 · 有改进空间"，
+              用户反馈 DonutRing 中心已有 "{score}%"，下面再写个 "60" 既冗余又没信息量。
+              现在改成后端 `aiSummary`（LLM 产出，失败时自动落到规则文案），直接告诉用户
+              「当前状况 + 需要优先处理的薄弱项 + 下一步建议」。
+            */}
+            <p className="mt-1 px-1 text-sm leading-relaxed text-text-secondary">
+              {profile.aiSummary?.trim()
+                ? profile.aiSummary
+                : profile.score >= 80
+                  ? "整体健康度良好，建议按季度复检并持续积累资产。"
+                  : profile.score >= 60
+                    ? "整体达标但仍有改进空间，建议聚焦最薄弱维度补强。"
+                    : "存在明显合规风险，建议优先处理高风险发现项并尽快复检。"}
             </p>
             <Badge variant={scoreAccent === "success" ? "success" : scoreAccent === "warning" ? "warning" : "error"} size="sm" className="mt-2">
               {profile.industry} · {profile.scale ?? "未填写"}
@@ -1232,5 +1255,376 @@ function PolicySubscriptions({
         ))}
       </div>
     </section>
+  );
+}
+
+// ===========================================================================
+// Integrations tab — 管理租户级 API 凭证
+// ===========================================================================
+//
+// 后端契约（详见 apps/api/app/api/routes/integrations.py）：
+//   GET  /integrations/providers          -> ProviderSchemaRaw[]
+//   GET  /integrations                    -> IntegrationSummaryRaw[]
+//   PUT  /integrations/{provider_key}     -> IntegrationSummaryRaw   （需 admin）
+//   DELETE /integrations/{provider_key}   -> 204                     （需 admin）
+//   POST /integrations/{provider_key}/test -> IntegrationTestResponse  （需 admin）
+//
+// 非 admin 用户写操作会收到 403，UI 捕获后降级为只读提示。
+//
+type ProviderSchemaRaw = {
+  provider_key: string;
+  label: string;
+  description: string;
+  secret_keys: string[];
+  config_keys: string[];
+  config_defaults: Record<string, unknown>;
+  primary_secret: string;
+};
+
+type IntegrationSummaryRaw = {
+  provider_key: string;
+  configured: boolean;
+  scope: "tenant" | "global" | null;
+  label: string | null;
+  key_hint: string;
+  last_used_at: string | null;
+  config: Record<string, unknown>;
+};
+
+type IntegrationTestResult = {
+  ok: boolean;
+  latency_ms: number;
+  source: string;
+  reason?: string | null;
+};
+
+function toSchema(raw: ProviderSchemaRaw): ProviderSchema {
+  return {
+    providerKey: raw.provider_key,
+    label: raw.label,
+    description: raw.description,
+    secretKeys: raw.secret_keys,
+    configKeys: raw.config_keys,
+    configDefaults: raw.config_defaults ?? {},
+    primarySecret: raw.primary_secret,
+  };
+}
+
+function toSummary(raw: IntegrationSummaryRaw): IntegrationSummary {
+  return {
+    providerKey: raw.provider_key,
+    configured: raw.configured,
+    scope: raw.scope,
+    label: raw.label,
+    keyHint: raw.key_hint ?? "",
+    lastUsedAt: raw.last_used_at,
+    config: raw.config ?? {},
+  };
+}
+
+function IntegrationsTab() {
+  const [schemas, setSchemas] = useState<ProviderSchema[] | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, IntegrationSummary>>({});
+  const [error, setError] = useState<string | ApplicationError | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [testState, setTestState] = useState<Record<string, IntegrationTestResult | "running">>({});
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [readonly, setReadonly] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [schemaList, summaryList] = await Promise.all([
+        request<ProviderSchemaRaw[]>("/integrations/providers"),
+        request<IntegrationSummaryRaw[]>("/integrations"),
+      ]);
+      setSchemas(schemaList.map(toSchema));
+      const byKey: Record<string, IntegrationSummary> = {};
+      for (const row of summaryList) byKey[row.provider_key] = toSummary(row);
+      setSummaries(byKey);
+    } catch (e) {
+      setError(e instanceof ApplicationError ? e : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const editingSchema = schemas?.find((s) => s.providerKey === editing) ?? null;
+
+  const handleSubmit = async (values: IntegrationFormValues) => {
+    if (!editingSchema) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await request<IntegrationSummaryRaw>(`/integrations/${editingSchema.providerKey}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          secrets: values.secrets,
+          config: values.config,
+          label: values.label || null,
+        }),
+      });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      // 403 = 非 admin；标记只读并提示。
+      if (e instanceof ApplicationError && e.status === 403) {
+        setReadonly(true);
+        setSubmitError("当前账号无权修改集成配置，请联系租户管理员。");
+      } else {
+        setSubmitError(e instanceof ApplicationError ? e.message : String(e));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (providerKey: string) => {
+    if (!window.confirm("确定要删除此集成配置？删除后将回退到全局/默认凭证。")) return;
+    setDeletingKey(providerKey);
+    try {
+      await request<null>(`/integrations/${providerKey}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      if (e instanceof ApplicationError && e.status === 403) {
+        setReadonly(true);
+      }
+      setError(e instanceof ApplicationError ? e : String(e));
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const handleTest = async (providerKey: string) => {
+    setTestState((prev) => ({ ...prev, [providerKey]: "running" }));
+    try {
+      const result = await request<IntegrationTestResult>(
+        `/integrations/${providerKey}/test`,
+        { method: "POST" },
+      );
+      setTestState((prev) => ({ ...prev, [providerKey]: result }));
+    } catch (e) {
+      if (e instanceof ApplicationError && e.status === 403) {
+        setReadonly(true);
+      }
+      setTestState((prev) => ({
+        ...prev,
+        [providerKey]: {
+          ok: false,
+          latency_ms: 0,
+          source: "unknown",
+          reason: e instanceof ApplicationError ? e.message : String(e),
+        },
+      }));
+    }
+  };
+
+  if (error && !schemas) {
+    return (
+      <div className="space-y-3">
+        <ErrorDisplay error={error} />
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            void load();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-elevated"
+        >
+          <IconGlyph name="refresh" size={12} />
+          重试
+        </button>
+      </div>
+    );
+  }
+
+  if (!schemas) {
+    return <div className="py-12 text-center text-sm text-text-tertiary">加载中…</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-border bg-surface p-5">
+        <SectionHeader
+          eyebrow="API Integrations"
+          title="集成配置"
+          description="在此管理本租户专属的 API 密钥（Bing 搜索 / 天眼查 / 豆包 LLM / 邮件 SMTP）。密钥全部在数据库中加密存储，前端仅显示末尾 4 位的掩码；保存后永远不会明文返回。未配置时自动回退到系统默认凭证。"
+        />
+        {readonly ? (
+          <p className="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700">
+            当前账号不是租户管理员，只能查看配置。如需修改，请联系租户管理员（admin / owner 角色）。
+          </p>
+        ) : null}
+      </section>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {schemas.map((schema) => {
+          const summary = summaries[schema.providerKey];
+          const test = testState[schema.providerKey];
+          return (
+            <article
+              key={schema.providerKey}
+              className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4"
+            >
+              <header className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-medium text-text-primary">{schema.label}</h3>
+                  <p className="mt-0.5 text-[11px] text-text-tertiary">{schema.description}</p>
+                </div>
+                <IntegrationStatusBadge summary={summary} />
+              </header>
+
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-text-secondary">
+                <dt className="text-text-tertiary">密钥</dt>
+                <dd className="font-mono text-text-primary">
+                  {summary?.keyHint || <span className="text-text-tertiary">未配置</span>}
+                </dd>
+                <dt className="text-text-tertiary">来源</dt>
+                <dd>
+                  {summary?.scope === "tenant"
+                    ? "租户专属"
+                    : summary?.scope === "global"
+                      ? "系统默认（全局）"
+                      : "未配置，将使用环境变量回退"}
+                </dd>
+                {summary?.label ? (
+                  <>
+                    <dt className="text-text-tertiary">备注</dt>
+                    <dd>{summary.label}</dd>
+                  </>
+                ) : null}
+                {summary?.lastUsedAt ? (
+                  <>
+                    <dt className="text-text-tertiary">最近使用</dt>
+                    <dd>{new Date(summary.lastUsedAt).toLocaleString()}</dd>
+                  </>
+                ) : null}
+              </dl>
+
+              {test && test !== "running" ? (
+                <p
+                  className={`rounded-md px-2 py-1 text-[11px] ${
+                    test.ok
+                      ? "bg-success-50 text-success-700"
+                      : "bg-error-50 text-error-700"
+                  }`}
+                >
+                  {test.ok
+                    ? `连通成功 · ${test.latency_ms}ms · 来源 ${test.source}`
+                    : `连通失败 · ${test.reason ?? "未知错误"}`}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={readonly}
+                  onClick={() => {
+                    setSubmitError(null);
+                    setEditing(schema.providerKey);
+                  }}
+                  className="rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {summary?.configured && summary.scope === "tenant" ? "更新凭证" : "配置"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!summary?.configured || test === "running"}
+                  onClick={() => void handleTest(schema.providerKey)}
+                  className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-primary hover:bg-surface-elevated disabled:opacity-60"
+                >
+                  {test === "running" ? "测试中…" : "测试连通性"}
+                </button>
+                {summary?.scope === "tenant" ? (
+                  <button
+                    type="button"
+                    disabled={readonly || deletingKey === schema.providerKey}
+                    onClick={() => void handleDelete(schema.providerKey)}
+                    className="ml-auto rounded-md border border-error-200 bg-surface px-3 py-1.5 text-xs text-error-600 hover:bg-error-50 disabled:opacity-60"
+                  >
+                    {deletingKey === schema.providerKey ? "删除中…" : "删除"}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      {editingSchema ? (
+        <Modal
+          title={`配置 · ${editingSchema.label}`}
+          onClose={() => {
+            if (!submitting) setEditing(null);
+          }}
+        >
+          <IntegrationForm
+            schema={editingSchema}
+            current={summaries[editingSchema.providerKey]}
+            submitting={submitting}
+            errorMessage={submitError}
+            onSubmit={handleSubmit}
+            onCancel={() => setEditing(null)}
+          />
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function IntegrationStatusBadge({ summary }: { summary: IntegrationSummary | undefined }) {
+  if (!summary?.configured) {
+    return <Badge variant="default" size="sm" dot>未配置</Badge>;
+  }
+  if (summary.scope === "tenant") {
+    return <Badge variant="success" size="sm" dot>已启用 · 租户</Badge>;
+  }
+  return <Badge variant="info" size="sm" dot>全局默认</Badge>;
+}
+
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  // 轻量级 Modal —— 不引新依赖；用 fixed + backdrop + 居中 card 实现。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-text-primary">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-text-tertiary hover:bg-surface-elevated"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
   );
 }

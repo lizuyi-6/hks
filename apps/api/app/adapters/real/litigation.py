@@ -387,6 +387,20 @@ class RealLitigationPredictorAdapter(LitigationPredictorPort):
         result = _compute_litigation(merged)
         base_prob = float((base or {}).get("win_probability") or 0.0)
         result["delta"] = round(result["win_probability"] - base_prob, 4) if base_prob else 0.0
+
+        # 复用 predict() 的 rationale 构造逻辑，让文案、证据清单、判例
+        # 数量等字段跟随新的胜率一起刷新，而不是让前端继续展示旧文案。
+        rationale = self._build_rationale(merged, result)
+        if rationale:
+            result["rationale"] = rationale
+
+        precedents = _build_precedents(merged, result["win_probability"])
+        result.setdefault("precedents", precedents)
+        result["precedents_source_count"] = {
+            "inline": len(precedents),
+            "knowledge_base": 0,  # simulate path 不再拉取 KB，以避免每次滑杆都打网络
+        }
+
         return make_envelope(
             mode=self.mode,
             provider=self.provider_name,

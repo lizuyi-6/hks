@@ -40,18 +40,42 @@ class RealCompetitorAdapter(CompetitorPort):
     def availability(self) -> tuple[bool, str | None]:
         return True, None
 
-    def track(self, company_name: str, trace_id: str):
+    def _resolve_cfg(self, tenant_id: str | None) -> dict | None:
+        from apps.api.app.core.database import SessionLocal
+        from apps.api.app.db.repositories.integrations import resolve_integration
+
+        db = SessionLocal()
+        try:
+            return resolve_integration(db, tenant_id, "tianyancha", self.settings)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "competitor.tianyancha.resolve_failed tenant=%s error=%s",
+                tenant_id,
+                exc,
+            )
+            return None
+        finally:
+            db.close()
+
+    def track(
+        self,
+        company_name: str,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
         ip_activity = "low"
         trademarks = []
         patents_count = 0
         extra_data = {}
 
-        if self.settings.tianyancha_api_key:
+        cfg = self._resolve_cfg(tenant_id)
+        api_key = (cfg or {}).get("secrets", {}).get("api_key") if cfg else ""
+        if api_key:
             try:
                 import httpx
 
                 url = "https://open.api.tianyancha.com/services/open/search/2.0"
-                headers = {"Authorization": self.settings.tianyancha_api_key}
+                headers = {"Authorization": api_key}
                 params = {"keyword": company_name, "pageSize": 3}
 
                 with httpx.Client(timeout=15) as client:
@@ -84,7 +108,7 @@ class RealCompetitorAdapter(CompetitorPort):
                 logger.warning("Competitor track via Tianyancha failed: %s", exc)
 
         # Always run LLM analysis
-        llm_result = self._analyze_with_llm(company_name, extra_data, trace_id)
+        llm_result = self._analyze_with_llm(company_name, extra_data, trace_id, tenant_id)
 
         if llm_result:
             return llm_result
@@ -92,11 +116,11 @@ class RealCompetitorAdapter(CompetitorPort):
         # LLM unavailable — return basic data
         return make_envelope(
             mode=self.mode,
-            provider=self.provider_name if self.settings.tianyancha_api_key else "basic-competitor",
+            provider=self.provider_name if api_key else "basic-competitor",
             trace_id=trace_id,
             source_refs=[
                 SourceRef(
-                    title="天眼查" if self.settings.tianyancha_api_key else "基础分析",
+                    title="天眼查" if api_key else "基础分析",
                     note=company_name,
                 )
             ],
@@ -110,7 +134,13 @@ class RealCompetitorAdapter(CompetitorPort):
             },
         )
 
-    def _analyze_with_llm(self, company_name: str, extra_data: dict, trace_id: str):
+    def _analyze_with_llm(
+        self,
+        company_name: str,
+        extra_data: dict,
+        trace_id: str,
+        tenant_id: str | None = None,
+    ):
         from apps.api.app.adapters.registry import provider_registry
 
         try:
@@ -120,7 +150,7 @@ class RealCompetitorAdapter(CompetitorPort):
                 import json
                 user_prompt += f"\n\n已知数据：{json.dumps(extra_data, ensure_ascii=False)}"
 
-            llm_result = llm.analyze_text(COMPETITOR_SYSTEM_PROMPT, user_prompt, trace_id)
+            llm_result = llm.analyze_text(COMPETITOR_SYSTEM_PROMPT, user_prompt, trace_id, tenant_id=tenant_id)
             payload = llm_result.normalized_payload
 
             if not isinstance(payload, dict):

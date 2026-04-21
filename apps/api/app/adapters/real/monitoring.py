@@ -54,38 +54,83 @@ class RealMonitoringAdapter(MonitoringPort):
     def availability(self) -> tuple[bool, str | None]:
         return True, None
 
-    def scan(self, query: str, trace_id: str):
+    def scan(self, query: str, trace_id: str, tenant_id: str | None = None):
         # ``fallback_refs`` accumulates breadcrumbs that get attached to the
         # final envelope so operators can tell at a glance that the result
         # came from a degraded path (e.g. Bing failed → DuckDuckGo) without
         # digging through server logs.
         fallback_refs: list[SourceRef] = []
 
-        if self.settings.bing_search_api_key:
-            search_results = self._fetch_bing(query, trace_id, fallback_refs)
+        cfg = self._resolve_bing_config(tenant_id)
+        if cfg is not None:
+            search_results = self._fetch_bing(query, trace_id, fallback_refs, cfg)
         else:
             search_results = self._fetch_duckduckgo(query, trace_id, fallback_refs)
 
         if search_results is not None:
             return self._analyze_with_llm(
-                query, search_results, MONITORING_SYSTEM_PROMPT, trace_id, fallback_refs
+                query,
+                search_results,
+                MONITORING_SYSTEM_PROMPT,
+                trace_id,
+                fallback_refs,
+                tenant_id,
             )
 
         # Search completely unavailable — ask LLM to analyze based on knowledge
-        return self._analyze_with_llm_no_search(query, trace_id, fallback_refs)
+        return self._analyze_with_llm_no_search(query, trace_id, fallback_refs, tenant_id)
+
+    # ------------------------------------------------------------------
+    # Credential resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_bing_config(self, tenant_id: str | None) -> dict | None:
+        """Look up effective Bing config (DB → .env) for this tenant.
+
+        Returns ``None`` when neither a DB row nor a ``.env`` key exists,
+        which tells :meth:`scan` to go straight to the DuckDuckGo path.
+        """
+        from apps.api.app.core.database import SessionLocal
+        from apps.api.app.db.repositories.integrations import resolve_integration
+
+        db = SessionLocal()
+        try:
+            return resolve_integration(db, tenant_id, "bing_search", self.settings)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "monitoring.bing.resolve_failed tenant=%s error=%s",
+                tenant_id,
+                exc,
+            )
+            return None
+        finally:
+            db.close()
 
     # ------------------------------------------------------------------
     # Search helpers (return list[dict] | None; None = service unavailable)
     # ------------------------------------------------------------------
 
-    def _fetch_bing(self, query: str, trace_id: str, fallback_refs: list[SourceRef]):
+    def _fetch_bing(
+        self,
+        query: str,
+        trace_id: str,
+        fallback_refs: list[SourceRef],
+        cfg: dict,
+    ):
         try:
-            headers = {"Ocp-Apim-Subscription-Key": self.settings.bing_search_api_key}
-            params = {"q": f"{query} 商标 侵权", "count": 10, "mkt": "zh-CN"}
+            config = cfg.get("config", {}) or {}
+            secrets = cfg.get("secrets", {}) or {}
+            headers = {"Ocp-Apim-Subscription-Key": secrets.get("api_key", "")}
+            params = {
+                "q": f"{query} 商标 侵权",
+                "count": 10,
+                "mkt": config.get("market", "zh-CN"),
+            }
+            endpoint = config.get("endpoint") or "https://api.bing.microsoft.com/v7.0/search"
 
             with httpx.Client(timeout=30) as client:
                 response = client.get(
-                    self.settings.bing_search_endpoint,
+                    endpoint,
                     headers=headers,
                     params=params,
                 )
@@ -180,6 +225,7 @@ class RealMonitoringAdapter(MonitoringPort):
         system_prompt: str,
         trace_id: str,
         fallback_refs: list[SourceRef],
+        tenant_id: str | None = None,
     ):
         """Use LLM to analyze search results for infringement risks."""
         from apps.api.app.adapters.registry import provider_registry
@@ -189,7 +235,7 @@ class RealMonitoringAdapter(MonitoringPort):
 
         llm = provider_registry.get("llm")
         try:
-            llm_result = llm.analyze_text(system_prompt, user_prompt, trace_id)
+            llm_result = llm.analyze_text(system_prompt, user_prompt, trace_id, tenant_id=tenant_id)
         except Exception as exc:
             # LLM unavailable (rate limit, transient upstream error, etc.):
             # we still have real search results, so the rule-based engine
@@ -232,6 +278,7 @@ class RealMonitoringAdapter(MonitoringPort):
         query: str,
         trace_id: str,
         fallback_refs: list[SourceRef],
+        tenant_id: str | None = None,
     ):
         """LLM analysis when search service is unavailable."""
         from apps.api.app.adapters.registry import provider_registry
@@ -239,7 +286,7 @@ class RealMonitoringAdapter(MonitoringPort):
         user_prompt = f"商标名称：{query}\n\n请分析该商标可能面临的侵权风险，提供一般性建议。"
         llm = provider_registry.get("llm")
         try:
-            llm_result = llm.analyze_text(MONITORING_NO_SEARCH_PROMPT, user_prompt, trace_id)
+            llm_result = llm.analyze_text(MONITORING_NO_SEARCH_PROMPT, user_prompt, trace_id, tenant_id=tenant_id)
         except Exception as exc:
             # Both search AND LLM are unavailable. Per CLAUDE.md "LLM
             # failure = user-visible error", we surface this as a real
