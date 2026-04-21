@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A1+ IP Coworker — AI-powered intellectual-property assistance for Chinese small-business founders. Prepares documents, analyzes IP situations, and guides submissions. Does **not** submit to official systems on behalf of users. All AI output carries a "仅供参考，以官方为准" disclaimer.
 
-> **Working directory**: The git root is one level above this file. All paths and commands below are relative to this `hks/` directory. Run `cd hks` before executing any command.
-
 ## Commands
 
 ```bash
@@ -31,13 +29,13 @@ uvicorn apps.api.main:app --reload --port 8000
 python -m apps.worker.main
 
 # Tests
-npm run test:api         # python -m pytest apps/api/tests apps/worker/tests
+npm run test:api         # python -m pytest apps/api/tests apps/worker/tests apps/cli/tests
 npm run test             # web + api tests
 ```
 
 ### Running a single test
 
-- Web (from `apps/web`): `npx vitest run src/path/to/test.ts`
+- Web (from project root): `npx vitest run src/path/to/test.ts --project @a1plus/web`
 - Python: `python -m pytest apps/api/tests/path/test_file.py -k "test_name"`
 
 ## Architecture
@@ -47,28 +45,47 @@ npm run test             # web + api tests
 ### Frontend (`apps/web`)
 
 - Next.js 15 + React 19 + Tailwind 3 + Vitest
-- **BFF layer** (`src/app/api/backend/[...path]/route.ts`) proxies `/api/backend/*` to FastAPI. Mock responses have been removed — all requests must reach the real FastAPI backend (set `NEXT_PRIVATE_API_BASE_URL`).
+- **BFF layer** (`src/app/api/backend/[...path]/route.ts`) proxies `/api/backend/*` to FastAPI with retry-on-401, SSE relay, and document download support. Set `NEXT_PRIVATE_API_BASE_URL` for the backend URL.
 - Auth routes (`src/app/api/auth/*`) set an `httpOnly` cookie (`a1plus-session`) after a successful FastAPI login.
 - SSE client: `lib/sse.ts` provides `fetchSSE<T>()` for consuming backend streaming endpoints.
-- Route groups: `(auth)` for login/register, `(workspace)` for authenticated pages
+- Route groups: `(auth)` for login/register, `(workspace)` for authenticated pages (20+ routes including dashboard, diagnosis, match, assets, consult, contracts, due-diligence, enterprise, inbox, litigation, monitoring, orders, policies, profile, provider, push-center, trademark)
 - Path alias `@/` → `src/`
 
 ### Backend (`apps/api`)
 
 - FastAPI + SQLAlchemy + Pydantic v2 + PostgreSQL + Redis
 - **Hexagonal (ports & adapters) architecture**:
-  - `app/ports/interfaces.py` — abstract port interfaces (e.g. `TrademarkSearchPort`, `LLMPort`)
-  - `app/adapters/real/` — production adapters (one file per port) — the only implementations kept in the repo
-  - `app/adapters/registry.py` — `ProviderRegistry` wires every port to its real adapter; there is no runtime mock/real switch
+  - `app/ports/interfaces.py` — 19 abstract port interfaces (e.g. `TrademarkSearchPort`, `LLMPort`, `ComplianceAuditPort`, `LitigationPredictorPort`, `PaymentEscrowPort`, `ESignaturePort`)
+  - `app/adapters/real/` — 20+ production adapter files (one per port, plus `matching_embedding.py` and `compliance_subaudits/` plugin directory) — the only implementations in the repo
+  - `app/adapters/registry.py` — `ProviderRegistry` wires every port to its real adapter; no runtime mock/real switch
 - **LLM provider is hardcoded**: `adapters/real/llm.py` points at Doubao-Seed-2.0-pro (Volcano Ark) with API key baked into the source. No `LLM_*` env vars are read.
 - All API responses are wrapped in `DataSourceEnvelope[T]` (generic envelope with `mode`, `traceId`, `sourceRefs`, `disclaimer`)
 - Pydantic models use camelCase aliasing (`to_camel` alias generator) so Python snake_case fields serialize as camelCase JSON
 - Config: `app/core/config.py` reads `.env` via pydantic-settings; defaults to SQLite for dev
-- Routes in `app/api/routes/` — 13 route modules (analytics, assets, auth, diagnosis, jobs, module_results, placeholders, reminders, stream, suggestions, system, trademarks, workflows)
-- SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence. The LLM adapter (`adapters/real/llm.py`) exposes async `*_stream()` variants (e.g. `diagnose_stream()`, `analyze_text_stream()`) that yield SSE tokens; non-streaming callers use the sync counterparts
+- Routes in `app/api/routes/` — 27 route modules: analytics, assets, auth, automation, chat, compliance, consultations, diagnosis, jobs, leads, litigation, matching, module_results, notifications, notifications_stream, orders, placeholders, profile, providers, reminders, stream, suggestions, system, trademarks, upload, workflows
+- SSE streaming: `app/core/streaming.py` + `routes/stream.py` provide server-sent events for diagnosis, contract review, patent assess, policy digest, due diligence. The LLM adapter (`adapters/real/llm.py`) exposes async `*_stream()` variants that yield SSE tokens; non-streaming callers use the sync counterparts
 - Error handling: `app/core/error_handler.py` defines a typed hierarchy (`ValidationError`, `NotFoundError`, `AuthError`, `BusinessError`, `SystemError`) with structured JSON responses
-- Database models (`app/db/models.py`): 14 tables — `Tenant`, `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult`, `SystemEvent`, `AutomationRule`, `Notification` — UUID string PKs, JSON columns
+- Database models (`app/db/models.py`): 33 tables across three domains:
+  - **Core** (13): `Tenant`, `User`, `JobRecord`, `IpAsset`, `ReminderTask`, `DocumentRecord`, `WorkflowInstance`, `WorkflowStep`, `ModuleResult`, `SystemEvent`, `AutomationRule`, `Notification`, `MonitoringWatchlist`
+  - **A1+ 2.0 services** (13): `LegalServiceProvider`, `ProviderCredential`, `ServiceProduct`, `UserProfileTag`, `MatchingRequest`, `MatchingCandidate`, `ConsultationSession`, `ServiceOrder`, `ComplianceProfile`, `ComplianceFinding`, `PolicySubscription`, `ProviderLead`, `FirmMember`
+  - **Litigation** (4): `LitigationCase`, `LitigationPrediction`, `LitigationScenario`, `LitigationPrecedent`
 - Auth: PBKDF2-SHA256 password hashing, HS256 JWT tokens (`app/core/security.py`)
+- SQLite lightweight migration: `server.py` includes `_sqlite_lightweight_migrate()` that patches columns added after initial table creation for dev SQLite setups (no Alembic)
+
+### Backend Services (`apps/api/app/services/`)
+
+- `auth.py` — user registration/login
+- `chat_service.py` — multi-turn chat with LLM
+- `compliance_engine.py` — compliance SaaS: audit execution with tiered quotas (free/pro/enterprise), policy radar subscriptions, audit report generation. Uses `ComplianceAuditPort` and `compliance_subaudits/` plugins
+- `litigation_service.py` — litigation case management, predictions, scenario analysis, precedent lookup
+- `matching_engine.py` — provider-client matching with rules or embedding-based reranking
+- `order_service.py` — service order lifecycle
+- `profile_engine.py` — user profile and tagging
+- `provider_crm.py` — legal service provider management and lead assignment
+- `workflow_engine.py` — multi-step workflow orchestration (e.g. trademark-registration: diagnosis → check → application → submit guide → ledger)
+- `automation_engine.py` — event-driven automation rules
+- `event_bus.py` + `event_types.py` — typed event system (`JOB_COMPLETED`, `MONITORING_ALERT`, `COMPLIANCE_AUDIT_COMPLETED`, etc.)
+- `notifications.py` — notification delivery
 
 ### CLI (`apps/cli`)
 
@@ -126,24 +143,11 @@ without any network I/O.
 - `enqueue_job()` uses SHA-256 of sorted JSON payload as idempotency key to prevent duplicate jobs
 - Uses the same adapter registry as the API
 
-### Workflow Engine
-
-- `apps/api/app/services/workflow_engine.py` orchestrates multi-step flows (e.g. `trademark-registration`: diagnosis → check → application → submit guide → ledger)
-- Step outputs are deep-merged into workflow context for downstream steps
-- `get_suggestions()` generates contextual suggestions based on user state (running workflows, completed diagnoses, expiring assets)
-
-### Event System
-
-- `services/event_bus.py` with `emit_event()` creates `SystemEvent` records
-- `services/event_types.py` defines event constants (`JOB_COMPLETED`, `MONITORING_ALERT`, `ASSET_EXPIRING_SOON`, etc.)
-- `services/automation_engine.py` processes events and fires `AutomationRule` actions
-- `worker/event_processor.py` consumes and processes events asynchronously
-
 ### Shared TS Packages
 
 - `packages/domain` — shared domain types, `modules` array (11 module definitions), `coreWorkflow`, `riskLevelMeta`
 - `packages/config` — feature flags, provider mode config, `legalBoundaryNotice` constant
-- `packages/ui` — shared atomic components (`SectionCard`, `SourceTag`, `StatusBadge`, `Metric`, `PipelineIndicator`, `NextStepCard`)
+- `packages/ui` — shared component library (14 primitives: button, input, textarea, select, loading, card, empty, error, badge, stepper, modal, toast, alert, workspace) plus legacy wrappers (`SectionCard`, `SourceTag`, `StatusBadge`, `Metric`, `PipelineIndicator`, `NextStepCard`)
 
 ### Knowledge Base (`knowledge-base/`)
 
@@ -161,8 +165,9 @@ without any network I/O.
 - **Legal boundary**: All user-facing outputs must include the disclaimer from `packages/config` (`legalBoundaryNotice`)
 - **Unified errors**: Backend raises typed `APIError` subclasses; frontend parses them into `ApplicationError` via `lib/errors.ts` — both share the same type hierarchy
 - **No global state**: Frontend components use local `useState`/`useEffect` with direct `fetch()` calls to the BFF
-- **LLM failure = user-visible error**: The LLM adapter no longer has a rules-engine fallback — when Doubao is unreachable or returns a malformed response, `LLMPort.diagnose` / `summarize_application` / `analyze_text` raise `SystemError` (HTTP 500). Streaming variants emit an `error` SSE event and end.
+- **LLM failure = user-visible error**: The LLM adapter has no rules-engine fallback — when Doubao is unreachable or returns a malformed response, `LLMPort.diagnose` / `summarize_application` / `analyze_text` raise `SystemError` (HTTP 500). Streaming variants emit an `error` SSE event and end.
 - **Search provider chain**: Monitoring adapter tries Bing API → DuckDuckGo (with custom SSL context for compatibility) → static knowledge-base rules. Each layer only activates when the previous one is unconfigured or fails
+- **Compliance subaudit plugins**: `adapters/real/compliance_subaudits/` contains pluggable audit modules loaded by the compliance engine
 
 ## Environment Variables
 
@@ -203,11 +208,11 @@ When propagating `tenant_id` through new adapter code, remember: any call into `
 
 - API tests use `conftest.py` fixtures: `client` (FastAPI `TestClient`) and `auth_headers`; database tables are dropped/recreated before each test automatically
 - Frontend tests run in Node environment (not jsdom); test files match `src/**/*.test.ts`
-- CI pipeline (`.github/workflows/ci.yml`): lint+build-web, test-api, test-worker, docker-build; deploy stages on push to `develop` (staging) and `main` (production)
+- CI pipeline (`.github/workflows/ci.yml`): lint+build-web, test-api (Python 3.12, coverage gate 35%), test-worker, docker-build; deploy stages on push to `develop` (staging) and `main` (production)
 
 ## Docker
 
-`docker-compose.yml` runs 5 services: PostgreSQL, Redis, API, Worker, Web. API and Worker share `Dockerfile.api` — Worker is the same image with a different entrypoint (`python -m apps.worker.main`). The web container uses Next.js `output: "standalone"`. Docker images use `hub.rat.dev` Chinese mirror by default (overridable via `--build-arg`).
+`docker-compose.yml` runs 6 services: PostgreSQL 16, Redis 7, API, Worker, CLI, Web. API, Worker, and CLI share `Dockerfile.api` — Worker and CLI use different entrypoints. The web container uses Next.js `output: "standalone"`. Docker images use `hub.rat.dev` Chinese mirror by default (overridable via `--build-arg`).
 
 ## Frontend Conventions
 
