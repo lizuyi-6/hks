@@ -5,8 +5,8 @@
  * 整合「合规评分仪表盘 / 体检详情 / 政策雷达 / 订阅管理」四个子页为 Tab。
  * 覆盖「合规 SaaS」赛道关键词。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, StreamingPanel } from "@a1plus/ui";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Badge, StreamingPanel, FormInput, SubmitButton } from "@a1plus/ui";
 import {
   PageHeader,
   SectionHeader,
@@ -677,8 +677,8 @@ function PolicyTab({ onGoSubscription }: { onGoSubscription?: () => void }) {
     }
   }, []);
 
-  // 首次挂载：尝试用用户合规档案里的行业自动触发一次扫描；
-  // 拿不到就停在 EmptyHero，让用户手动挑行业（避免空响应并提供明确引导）。
+  // 首次挂载：仅用用户合规档案里的行业预填输入框/芯片选中态，
+  // 不自动触发扫描；由用户确认或修改后点击「开始扫描」才真正发起请求。
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -688,20 +688,25 @@ function PolicyTab({ onGoSubscription }: { onGoSubscription?: () => void }) {
         const industry = profile?.industry?.trim();
         if (industry) {
           setIndustryInput(industry);
-          void runDigest(industry);
         }
       } catch {
-        // 忽略：档案拉取失败不应阻塞政策雷达；用户仍可手动选择行业。
+        // 忽略：档案拉取失败不应阻塞政策雷达；用户仍可手动输入/选择行业。
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [runDigest]);
+  }, []);
 
   const handlePickIndustry = (c: string) => {
     setIndustryInput(c);
-    void runDigest(c);
+  };
+
+  const handleScanSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const target = industryInput.trim();
+    if (!target || loading) return;
+    void runDigest(target);
   };
 
   return (
@@ -710,29 +715,47 @@ function PolicyTab({ onGoSubscription }: { onGoSubscription?: () => void }) {
         <SectionHeader
           eyebrow="Industry"
           title="选择行业"
-          description="政策雷达会针对所选行业整理近期监管动向与合规提醒。"
+          description="政策雷达会针对所选行业整理近期监管动向与合规提醒。输入或选择行业后点击「开始扫描」。"
         />
-        <div className="mt-3 flex flex-wrap gap-2">
-          {INDUSTRY_CHIPS.map((c) => {
-            const active = industryInput === c;
-            return (
-              <button
-                key={c}
-                type="button"
-                disabled={loading}
-                onClick={() => handlePickIndustry(c)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                  active
-                    ? `${accentBgClass("primary")} border-transparent`
-                    : "border-border bg-surface text-text-secondary hover:bg-surface-elevated"
-                }`}
-              >
-                <IconGlyph name="target" size={12} />
-                {c}
-              </button>
-            );
-          })}
-        </div>
+        <form onSubmit={handleScanSubmit} className="mt-3 grid gap-3">
+          <FormInput
+            name="industry"
+            label="行业"
+            value={industryInput}
+            onChange={(e) => setIndustryInput(e.target.value)}
+            placeholder="输入行业，例如：跨境电商 / SaaS / 医疗"
+            disabled={loading}
+            required
+          />
+          <div className="flex flex-wrap gap-2">
+            {INDUSTRY_CHIPS.map((c) => {
+              const active = industryInput === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => handlePickIndustry(c)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    active
+                      ? `${accentBgClass("primary")} border-transparent`
+                      : "border-border bg-surface text-text-secondary hover:bg-surface-elevated"
+                  }`}
+                >
+                  <IconGlyph name="target" size={12} />
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+          <SubmitButton
+            loading={loading}
+            loadingText="扫描中..."
+            disabled={!industryInput.trim()}
+          >
+            开始扫描政策雷达
+          </SubmitButton>
+        </form>
       </section>
 
       {loading ? (
@@ -766,7 +789,7 @@ function PolicyTab({ onGoSubscription }: { onGoSubscription?: () => void }) {
           icon="policies"
           accent="info"
           title="选择行业，开启政策雷达"
-          description="从上方行业芯片挑一个，或点击下方按钮以「通用」行业扫描一次。"
+          description="在上方输入行业关键词或选择推荐行业，然后点击「开始扫描政策雷达」。也可以直接以「通用」行业快速扫描一次。"
           primaryAction={{
             label: "以「通用」行业扫描",
             onClick: () => runDigest("通用"),
