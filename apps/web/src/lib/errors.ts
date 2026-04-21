@@ -66,6 +66,12 @@ function formatDetail(detail: unknown): string | null {
     return parts.length > 0 ? parts.join("; ") : null;
   }
   if (typeof detail === "object") {
+    const obj = detail as Record<string, unknown>;
+    // Backend sometimes wraps structured errors as ``{code, message, ...}``.
+    // Surface ``message`` for humans, keep the rest for ``details``.
+    if (typeof obj.message === "string" && obj.message.trim()) {
+      return obj.message;
+    }
     try {
       return JSON.stringify(detail);
     } catch {
@@ -83,12 +89,20 @@ export function parseErrorResponse(
     const data = JSON.parse(text);
     if (data.errorType || data.detail || data.message) {
       const friendlyDetail = formatDetail(data.detail);
+      // Preserve structured ``detail`` objects (e.g. ``{code, tier, quota,
+      // used}``) so UI branches can pattern-match on the code without having
+      // to re-parse the message string.
+      const structuredDetails =
+        data.details ??
+        (data.detail && typeof data.detail === "object" && !Array.isArray(data.detail)
+          ? (data.detail as Record<string, unknown>)
+          : undefined);
       return new ApplicationError(
         data.message || friendlyDetail || "Unknown error",
         mapStatusToErrorType(data.errorType, text),
         data.errorLocation || location,
         data.requestId,
-        data.details
+        structuredDetails
       );
     }
   } catch {

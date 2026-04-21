@@ -116,14 +116,22 @@ async function proxy(request: Request, params: { path: string[] }) {
   try {
     const response = await proxyWithRetry(request, pathname, url, token, body, refreshState);
 
-    if (pathname.includes("/documents/") || pathname.startsWith("documents/")) {
+    // Treat any upstream response that comes back with a Content-Disposition
+    // header as a download (compliance reports, trademark docs, signed PDFs,
+    // etc.) so the browser does the right thing regardless of URL prefix.
+    const upstreamDisposition = response.headers.get("content-disposition");
+    if (
+      pathname.includes("/documents/") ||
+      pathname.startsWith("documents/") ||
+      upstreamDisposition
+    ) {
       const buffer = await response.arrayBuffer();
       return applyRefreshedCookie(
         new NextResponse(buffer, {
           status: response.status,
           headers: {
             "Content-Type": response.headers.get("content-type") ?? "application/octet-stream",
-            "Content-Disposition": response.headers.get("content-disposition") ?? "attachment",
+            "Content-Disposition": upstreamDisposition ?? "attachment",
           },
         }),
         refreshState,

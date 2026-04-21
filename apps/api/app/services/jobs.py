@@ -261,6 +261,7 @@ def process_job(db: Session, job: JobRecord) -> JobRecord:
                 download_endpoints={
                     "docx": f"/trademarks/documents/{record.id}.docx",
                     "pdf": f"/trademarks/documents/{record.id}.pdf",
+                    "md": f"/trademarks/documents/{record.id}.md",
                 },
             )
             job.result = draft.model_dump(mode="json", by_alias=True)
@@ -704,6 +705,7 @@ def build_submission_bundle(db: Session, draft_id: str) -> dict:
         download_endpoints={
             "docx": f"/trademarks/documents/{record.id}.docx",
             "pdf": f"/trademarks/documents/{record.id}.pdf",
+            "md": f"/trademarks/documents/{record.id}.md",
         },
     )
     return {
@@ -721,7 +723,17 @@ def build_submission_bundle(db: Session, draft_id: str) -> dict:
 
 
 def document_path_for(record: DocumentRecord, extension: str) -> Path:
-    path = Path(record.docx_path if extension == "docx" else record.pdf_path)
+    if extension == "docx":
+        path = Path(record.docx_path)
+    elif extension == "pdf":
+        path = Path(record.pdf_path)
+    elif extension == "md":
+        # Markdown is the source of truth but isn't persisted on its own
+        # column — infer it from the DOCX basename written by the
+        # ``md-unified-pipeline`` renderer.
+        path = Path(record.docx_path).with_suffix(".md")
+    else:
+        raise ValueError(f"Unsupported extension: {extension}")
     if not path.exists():
         raise ValueError("Document not found")
     return path

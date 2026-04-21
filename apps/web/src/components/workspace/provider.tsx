@@ -335,7 +335,7 @@ function Dashboard() {
               <DonutRing
                 percent={roi.leads.claimRate}
                 label={`${roi.leads.claimRate.toFixed(0)}%`}
-                color="var(--color-primary-500)"
+                color="rgb(var(--color-primary-500))"
                 size={96}
               />
               <div className="text-xs text-text-secondary">

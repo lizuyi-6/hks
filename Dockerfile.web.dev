@@ -1,0 +1,32 @@
+# Dev-only image for the Next.js web app.
+#
+# Unlike Dockerfile.web (which compiles a standalone production bundle), this
+# image just installs the workspace node_modules. The application source is
+# expected to be bind-mounted from the host at runtime via
+# docker-compose.override.yml, and Next.js runs in dev mode so edits on the
+# host hot-reload in the browser without any image rebuild.
+
+ARG NODE_IMAGE=node:20-slim
+FROM ${NODE_IMAGE}
+
+WORKDIR /workspace
+
+# Install dependencies based on the lockfile + every workspace package.json
+# so the npm workspace graph resolves correctly. Source code is intentionally
+# NOT copied — the override compose file bind-mounts /workspace from the host.
+COPY package.json package-lock.json* ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+
+RUN npm install
+
+EXPOSE 3000
+
+# Invoke ``next`` from the web workspace directly; the nested
+# ``npm run dev:web`` chain eats ``--`` flags before they reach ``next dev``.
+# The compose override sets working_dir and overrides CMD, but this default
+# lets ``docker run Dockerfile.web.dev`` work on its own too.
+WORKDIR /workspace/apps/web
+CMD ["npx", "next", "dev", "--hostname", "0.0.0.0"]

@@ -62,6 +62,7 @@ export type ApplicationDraft = {
   downloadEndpoints: {
     docx: string;
     pdf: string;
+    md?: string;
   };
 };
 

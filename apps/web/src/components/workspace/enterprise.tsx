@@ -121,7 +121,7 @@ export function EnterpriseSpace() {
         onChange={setTab}
       />
 
-      {tab === "overview" && <Overview />}
+      {tab === "overview" && <Overview onGoSubscription={() => setTab("subscription")} />}
       {tab === "audit" && <AuditTab />}
       {tab === "policy" && <PolicyTab onGoSubscription={() => setTab("subscription")} />}
       {tab === "subscription" && <SubscriptionTab />}
@@ -129,10 +129,64 @@ export function EnterpriseSpace() {
   );
 }
 
-function Overview() {
+function isQuotaExceededError(err: ApplicationError): boolean {
+  const d = (err.details ?? {}) as Record<string, unknown>;
+  if (d.code === "compliance.audit.quota_exceeded") return true;
+  return /额度/.test(err.message || "");
+}
+
+function QuotaExceededAlert({
+  error,
+  onGoSubscription,
+  onDismiss,
+}: {
+  error: ApplicationError;
+  onGoSubscription?: () => void;
+  onDismiss?: () => void;
+}) {
+  const d = (error.details ?? {}) as Record<string, unknown>;
+  const tierLabel = typeof d.tierLabel === "string" ? d.tierLabel : "当前方案";
+  const quota = typeof d.quota === "number" ? d.quota : undefined;
+  const used = typeof d.used === "number" ? d.used : undefined;
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-warning-500/60 bg-warning-50/60 p-4 text-sm">
+      <div className="min-w-0">
+        <p className="font-medium text-warning-700">本月合规体检额度已用完</p>
+        <p className="mt-1 text-xs text-text-secondary">
+          「{tierLabel}」{quota !== undefined ? `每月 ${quota} 次` : ""}
+          {used !== undefined ? ` · 已使用 ${used} 次` : ""}
+          {" · "}升级到更高订阅可继续体检。
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {onGoSubscription ? (
+          <button
+            type="button"
+            onClick={onGoSubscription}
+            className="rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-primary-700"
+          >
+            去「订阅方案」
+          </button>
+        ) : null}
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-secondary hover:bg-surface-elevated"
+          >
+            知道了
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Overview({ onGoSubscription }: { onGoSubscription?: () => void }) {
   const [profile, setProfile] = useState<ComplianceProfile | null>(null);
   const [error, setError] = useState<string | ApplicationError | null>(null);
   const [running, setRunning] = useState(false);
+  const [justRefreshedAt, setJustRefreshedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -147,34 +201,90 @@ function Overview() {
     load();
   }, [load]);
 
-  const runAudit = async () => {
+  // 3 秒后自动隐藏"已更新"提示，避免一直挂着让用户以为还在刷新。
+  useEffect(() => {
+    if (justRefreshedAt == null) return;
+    const t = window.setTimeout(() => setJustRefreshedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [justRefreshedAt]);
+
+  const runAudit = useCallback(async () => {
+    if (running) return;
+    // 关键：清掉旧错误，否则 if (error) return <ErrorDisplay/> 之前的早期实现
+    // 会把整块 Overview 吞成一条红字，用户误以为"按钮无响应"。
+    setError(null);
+    setJustRefreshedAt(null);
     setRunning(true);
+    // 最小 loading 可视时长（350ms），避免 React 18 自动 batching 把
+    // setRunning(true) 和 setRunning(false) 合并成同一次 render，
+    // "体检中…" 一帧都看不见。
+    const minDelay = new Promise((r) => setTimeout(r, 350));
     try {
-      await request("/compliance/audit", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
+      const body: Record<string, string> = {};
+      if (profile?.companyName) body.companyName = profile.companyName;
+      if (profile?.industry) body.industry = profile.industry;
+      if (profile?.scale) body.scale = profile.scale;
+      await Promise.all([
+        request("/compliance/audit", {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+        minDelay,
+      ]);
       await load();
+      setJustRefreshedAt(Date.now());
     } catch (e) {
       setError(e instanceof ApplicationError ? e : String(e));
     } finally {
       setRunning(false);
     }
-  };
+  }, [load, profile, running]);
 
-  if (error) return <ErrorDisplay error={error} />;
+  const quotaError =
+    error instanceof ApplicationError && isQuotaExceededError(error) ? error : null;
+  const genericError = error && !quotaError ? error : null;
+
+  if (!profile && error && !quotaError) {
+    // 初次 load 就失败：没有 profile 可渲染，给一个带"重试"的兜底。
+    return (
+      <div className="space-y-3">
+        <ErrorDisplay error={error} />
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            void load();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-elevated"
+        >
+          <IconGlyph name="refresh" size={12} />
+          重试加载
+        </button>
+      </div>
+    );
+  }
+
   if (!profile) {
     return (
-      <EmptyHero
-        icon="shield"
-        accent="warning"
-        title="还没有合规档案"
-        description="点击下方按钮开始第一次 IP 合规体检，系统会自动生成评分、风险热力图与改进建议。"
-        primaryAction={{
-          label: running ? "体检中…" : "开始合规体检",
-          onClick: running ? undefined : runAudit,
-        }}
-      />
+      <div className="space-y-3">
+        {quotaError ? (
+          <QuotaExceededAlert
+            error={quotaError}
+            onGoSubscription={onGoSubscription}
+            onDismiss={() => setError(null)}
+          />
+        ) : null}
+        <EmptyHero
+          icon="shield"
+          accent="warning"
+          title="还没有合规档案"
+          description="点击下方按钮开始第一次 IP 合规体检，系统会自动生成评分、风险热力图与改进建议。"
+          primaryAction={{
+            label: running ? "体检中…" : "开始合规体检",
+            onClick: running ? undefined : runAudit,
+          }}
+        />
+      </div>
     );
   }
 
@@ -182,10 +292,10 @@ function Overview() {
     profile.score >= 80 ? "success" : profile.score >= 60 ? "warning" : "error";
   const scoreColor =
     profile.score >= 80
-      ? "var(--color-success-500)"
+      ? "rgb(var(--color-success-500))"
       : profile.score >= 60
-        ? "var(--color-warning-500)"
-        : "var(--color-error-500)";
+        ? "rgb(var(--color-warning-500))"
+        : "rgb(var(--color-error-500))";
 
   const heatmap = profile.heatmap ?? {};
   const breakdown = profile.breakdown ?? {};
@@ -196,6 +306,26 @@ function Overview() {
 
   return (
     <div className="space-y-6">
+      {quotaError ? (
+        <QuotaExceededAlert
+          error={quotaError}
+          onGoSubscription={onGoSubscription}
+          onDismiss={() => setError(null)}
+        />
+      ) : null}
+      {genericError ? (
+        <div className="space-y-2">
+          <ErrorDisplay error={genericError} />
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1 text-xs text-text-secondary hover:bg-surface-elevated"
+          >
+            关闭提示
+          </button>
+        </div>
+      ) : null}
+
       {/* ===== Score dashboard ===== */}
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-[auto_1fr]">
         <div className="flex flex-col items-center rounded-xl border border-border bg-surface p-6">
@@ -220,8 +350,18 @@ function Overview() {
             <Badge variant={scoreAccent === "success" ? "success" : scoreAccent === "warning" ? "warning" : "error"} size="sm" className="mt-2">
               {profile.industry} · {profile.scale ?? "未填写"}
             </Badge>
+            {justRefreshedAt ? (
+              <p className="mt-2 text-[11px] text-success-600">
+                已更新 · {new Date(justRefreshedAt).toLocaleTimeString()}
+              </p>
+            ) : profile.lastAuditAt ? (
+              <p className="mt-2 text-[11px] text-text-tertiary">
+                上次体检 {new Date(profile.lastAuditAt).toLocaleString()}
+              </p>
+            ) : null}
           </div>
           <button
+            type="button"
             onClick={runAudit}
             disabled={running}
             className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary-600 px-4 text-sm font-medium text-text-inverse hover:bg-primary-700 disabled:opacity-60"
@@ -364,6 +504,7 @@ function AuditTab() {
     );
   }
 
+  const reportBase = `/api/backend/compliance/profile/${profile.id}/report`;
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-border bg-surface p-5">
@@ -372,15 +513,34 @@ function AuditTab() {
           title={`${profile.companyName} · 合规体检报告`}
           description={`更新于 ${profile.lastAuditAt ? new Date(profile.lastAuditAt).toLocaleString() : "—"}`}
           actions={
-            <a
-              href={`/api/backend/compliance/profile/${profile.id}/report`}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-elevated"
-            >
-              <IconGlyph name="download" size={12} />
-              下载报告
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`${reportBase}.md`}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-elevated"
+              >
+                <IconGlyph name="download" size={12} />
+                下载 MD
+              </a>
+              <a
+                href={`${reportBase}.docx`}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-elevated"
+              >
+                <IconGlyph name="download" size={12} />
+                下载 Word
+              </a>
+              <a
+                href={`${reportBase}.pdf`}
+                className="inline-flex h-8 items-center gap-1 rounded-md bg-primary-600 px-3 text-xs font-medium text-text-inverse hover:bg-primary-700"
+              >
+                <IconGlyph name="download" size={12} />
+                下载 PDF
+              </a>
+            </div>
           }
         />
+        <p className="mt-2 text-[11px] text-text-tertiary">
+          Word / PDF 均由同一份 Markdown 源生成，内容一致。
+        </p>
       </section>
 
       {(profile.findings ?? []).map((f) => (

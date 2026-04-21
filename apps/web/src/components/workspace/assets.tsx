@@ -275,6 +275,42 @@ export function AssetLedgerPanel() {
         hint="资产台账承接订单交付物，是服务数字化的沉淀底座。"
       />
 
+      {/* ===== Create form (collapsible) — placed right under the page title ===== */}
+      {showForm && (
+        <WorkspaceCard title="新增资产" eyebrow="Manual ledger">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await handleCreate(new FormData(e.currentTarget));
+            }}
+            className="grid gap-4 md:grid-cols-2"
+          >
+            <FormInput name="name" label="资产名称" placeholder="资产名称" required />
+            <div className="w-full">
+              <label htmlFor="assetType" className="mb-1.5 block text-sm font-medium text-text-primary">
+                类型
+              </label>
+              <select
+                id="assetType"
+                name="type"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20"
+                defaultValue="trademark"
+              >
+                <option value="trademark">商标</option>
+                <option value="patent">专利</option>
+                <option value="soft-copyright">软著</option>
+                <option value="copyright">版权</option>
+              </select>
+            </div>
+            <FormInput name="registrationNumber" label="注册号" placeholder="注册号（可选）" />
+            <FormInput name="expiresAt" label="到期日" type="date" />
+            <div className="md:col-span-2">
+              <SubmitButton loading={creating}>添加资产</SubmitButton>
+            </div>
+          </form>
+        </WorkspaceCard>
+      )}
+
       {error ? <ErrorDisplay error={error} /> : null}
 
       {/* ===== KPI ===== */}
@@ -427,42 +463,6 @@ export function AssetLedgerPanel() {
           />
         ))}
       </section>
-
-      {/* ===== Create form (collapsible) ===== */}
-      {showForm && (
-        <WorkspaceCard title="新增资产" eyebrow="Manual ledger">
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              await handleCreate(new FormData(e.currentTarget));
-            }}
-            className="grid gap-4 md:grid-cols-2"
-          >
-            <FormInput name="name" label="资产名称" placeholder="资产名称" required />
-            <div className="w-full">
-              <label htmlFor="assetType" className="mb-1.5 block text-sm font-medium text-text-primary">
-                类型
-              </label>
-              <select
-                id="assetType"
-                name="type"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20"
-                defaultValue="trademark"
-              >
-                <option value="trademark">商标</option>
-                <option value="patent">专利</option>
-                <option value="soft-copyright">软著</option>
-                <option value="copyright">版权</option>
-              </select>
-            </div>
-            <FormInput name="registrationNumber" label="注册号" placeholder="注册号（可选）" />
-            <FormInput name="expiresAt" label="到期日" type="date" />
-            <div className="md:col-span-2">
-              <SubmitButton loading={creating}>添加资产</SubmitButton>
-            </div>
-          </form>
-        </WorkspaceCard>
-      )}
 
       {/* ===== Asset list with filters ===== */}
       <section className="rounded-lg border border-border bg-surface">

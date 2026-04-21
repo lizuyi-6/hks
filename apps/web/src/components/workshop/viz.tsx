@@ -83,7 +83,7 @@ export function Sparkline({
 export function DonutRing({
   percent,
   color = "currentColor",
-  track = "rgba(0,0,0,0.08)",
+  track = "rgb(var(--color-border) / 0.6)",
   size = 88,
   strokeWidth = 8,
   label,
@@ -150,7 +150,7 @@ export function BarRow({
   value,
   max,
   color = "currentColor",
-  track = "rgba(0,0,0,0.06)",
+  track = "rgb(var(--color-border) / 0.6)",
   suffix,
   labelStyle,
   valueStyle,
@@ -266,8 +266,8 @@ export function AreaChart({
   width = 560,
   height = 160,
   showGrid = true,
-  gridColor = "rgba(0,0,0,0.06)",
-  labelColor = "rgba(0,0,0,0.45)",
+  gridColor = "rgb(var(--color-border) / 0.6)",
+  labelColor = "rgb(var(--color-text-tertiary))",
 }: {
   data: number[];
   labels?: string[];

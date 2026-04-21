@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 
 /* ============================================================
    Sparkline — smooth-ish polyline + gradient area fill
@@ -82,7 +82,7 @@ export function Sparkline({
 export function DonutRing({
   percent,
   color = "currentColor",
-  track = "rgba(0,0,0,0.08)",
+  track = "rgb(var(--color-border) / 0.6)",
   size = 88,
   strokeWidth = 8,
   label,
@@ -99,6 +99,25 @@ export function DonutRing({
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percent / 100) * circumference;
+
+  // 开发期自检：直接传 "var(--color-xxx)" 给 SVG stroke 会在 Tailwind rgb
+  // 元组变量下失效（stroke 解析为 "76 155 102" 非法色），进度弧不渲染。
+  // 必须写成 "rgb(var(--color-xxx))" 或加 alpha 的完整形式。
+  const warnedRef = useRef(false);
+  useEffect(() => {
+    if (warnedRef.current) return;
+    if (process.env.NODE_ENV === "production") return;
+    if (typeof color !== "string") return;
+    const trimmed = color.trim();
+    if (/^var\(\s*--color-[^)]+\)$/.test(trimmed)) {
+      warnedRef.current = true;
+      console.warn(
+        `[DonutRing] color="${trimmed}" 在 SVG stroke 中不是合法 CSS 颜色。` +
+          ` 项目中 --color-* 变量存的是裸 rgb 元组（例: "76 155 102"），` +
+          ` 需要写成 "rgb(${trimmed})" 或 "rgb(${trimmed} / 0.8)"。`,
+      );
+    }
+  }, [color]);
 
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
@@ -149,7 +168,7 @@ export function BarRow({
   value,
   max,
   color = "currentColor",
-  track = "rgba(0,0,0,0.06)",
+  track = "rgb(var(--color-border) / 0.6)",
   suffix,
   labelStyle,
   valueStyle,
@@ -265,8 +284,8 @@ export function AreaChart({
   width = 560,
   height = 160,
   showGrid = true,
-  gridColor = "rgba(0,0,0,0.06)",
-  labelColor = "rgba(0,0,0,0.45)",
+  gridColor = "rgb(var(--color-border) / 0.6)",
+  labelColor = "rgb(var(--color-text-tertiary))",
 }: {
   data: number[];
   labels?: string[];

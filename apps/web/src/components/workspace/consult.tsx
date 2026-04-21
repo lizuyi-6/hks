@@ -1333,19 +1333,19 @@ function CandidateCard({
       <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-surface-elevated p-2 text-[11px] text-text-secondary">
         <div className="flex flex-col items-center">
           <span className="text-text-primary tabular-nums">
-            {p.ratingAvg.toFixed(1)}
+            {(p.ratingAvg ?? 0).toFixed(1)}
           </span>
           <span className="text-text-tertiary">评分</span>
         </div>
         <div className="flex flex-col items-center">
           <span className="text-text-primary tabular-nums">
-            {p.ordersCount}
+            {p.ordersCount ?? 0}
           </span>
           <span className="text-text-tertiary">已交付</span>
         </div>
         <div className="flex flex-col items-center">
           <span className="text-text-primary tabular-nums">
-            {p.responseSlaMinutes}m
+            {p.responseSlaMinutes ?? 0}m
           </span>
           <span className="text-text-tertiary">响应</span>
         </div>

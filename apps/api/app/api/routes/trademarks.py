@@ -124,7 +124,7 @@ def download_document(
     db: Session = Depends(get_db),
     _ctx: TenantContext = Depends(get_current_tenant),
 ):
-    if extension not in {"docx", "pdf"}:
+    if extension not in {"docx", "pdf", "md"}:
         raise ValidationError(message="不支持的文件类型", field="/trademarks/documents")
 
     try:
@@ -146,9 +146,9 @@ def download_document(
     except Exception as e:
         raise SystemError(message=str(e), error_location=f"/trademarks/documents/{draft_id}.{extension}") from e
 
-    media_type = (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        if extension == "docx"
-        else "application/pdf"
-    )
+    media_type = {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pdf": "application/pdf",
+        "md": "text/markdown; charset=utf-8",
+    }[extension]
     return FileResponse(Path(path), media_type=media_type, filename=Path(path).name)

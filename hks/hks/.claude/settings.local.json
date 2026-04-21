@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/PXCV/Desktop/project/HKS/**)",
+      "Bash(rm -rf hks/hks/docs)",
+      "Bash(rm -rf hks/hks)",
+      "Bash(rm -rf hks)"
+    ]
+  }
+}

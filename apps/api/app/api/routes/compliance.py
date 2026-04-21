@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+from tempfile import gettempdir
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import get_db
+from apps.api.app.core.md_renderer import md_to_docx, md_to_pdf
 from apps.api.app.db.models import User
 from apps.api.app.services.compliance_engine import (
     SUBSCRIPTION_TIERS,
+    ComplianceQuotaExceeded,
     build_audit_markdown,
     create_policy_subscription,
     get_profile,
@@ -53,8 +62,21 @@ def run_audit(
             industry=body.industry,
             scale=body.scale,
         )
+    except ComplianceQuotaExceeded as e:
+        # 结构化 detail，前端据此渲染"升级订阅"按钮而不是一条干瘪的红字。
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "compliance.audit.quota_exceeded",
+                "message": str(e),
+                "tier": e.tier,
+                "tierLabel": e.tier_label,
+                "quota": e.quota,
+                "used": e.used,
+            },
+        ) from e
     except ValueError as e:
-        # 订阅配额耗尽等可预见的业务错误，用 402 而非 500 呈现。
+        # 其它可预见的业务错误（如非法 tier）保持 402 语义。
         raise HTTPException(status_code=402, detail=str(e)) from e
     return result
 
@@ -71,17 +93,87 @@ def read_profile_by_id(
     return data
 
 
+def _report_out_dir() -> Path:
+    """Where to stage transient DOCX/PDF report files."""
+    try:
+        target = Path(get_settings().generated_dir) / "compliance-reports"
+    except Exception:  # pragma: no cover - settings always resolve
+        target = Path(gettempdir()) / "compliance-reports"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _safe_report_basename(data: dict) -> str:
+    name = (data.get("companyName") or "compliance") + "-report"
+    name = re.sub(r"[^\w\u4e00-\u9fff\-]+", "_", name)[:60]
+    return name or "compliance-report"
+
+
 @router.get("/profile/{profile_id}/report")
 def download_report(
     profile_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Legacy endpoint kept for callers that expect raw Markdown.
+
+    New code should hit the ``.md/.docx/.pdf`` variants below.
+    """
     data = get_profile_by_id(db, user, profile_id)
     if not data:
         raise HTTPException(status_code=404, detail="合规档案不存在")
     md = build_audit_markdown(data)
     return Response(content=md, media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/profile/{profile_id}/report.{ext}")
+def download_report_formatted(
+    profile_id: str,
+    ext: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Multi-format download: ``ext`` ∈ {md, docx, pdf}.
+
+    Everything is driven from the same Markdown source so Word and PDF
+    always stay in sync with the Markdown view.
+    """
+    ext = (ext or "").lower()
+    if ext not in {"md", "docx", "pdf"}:
+        raise HTTPException(status_code=400, detail="仅支持 md / docx / pdf 三种格式")
+    data = get_profile_by_id(db, user, profile_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="合规档案不存在")
+
+    md = build_audit_markdown(data)
+    basename = _safe_report_basename(data)
+    download_name = f"{basename}.{ext}"
+
+    if ext == "md":
+        return Response(
+            content=md,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{download_name}"',
+            },
+        )
+
+    out_dir = _report_out_dir()
+    out_path = out_dir / f"{basename}-{uuid4().hex[:8]}.{ext}"
+    if ext == "docx":
+        md_to_docx(md, out_path)
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    else:
+        md_to_pdf(md, out_path)
+        media_type = "application/pdf"
+
+    return FileResponse(
+        path=out_path,
+        media_type=media_type,
+        filename=download_name,
+    )
 
 
 @router.get("/policy-radar")

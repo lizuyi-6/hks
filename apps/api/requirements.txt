@@ -1,5 +1,9 @@
 fastapi==0.115.12
 uvicorn==0.34.0
+# Explicit so ``uvicorn --reload`` always uses the fast WatchFiles reloader
+# and the worker container can invoke the ``watchfiles`` CLI for
+# restart-on-change. Pulled transitively by uvicorn[standard] anyway.
+watchfiles>=0.21
 sqlalchemy==2.0.40
 pydantic==2.11.3
 pydantic-settings==2.8.1

@@ -75,6 +75,18 @@ def test_trademark_check_and_application_flow(client, auth_headers):
     draft = result.json()["result"]
     assert draft["downloadEndpoints"]["docx"].endswith(".docx")
     assert draft["downloadEndpoints"]["pdf"].endswith(".pdf")
+    assert draft["downloadEndpoints"]["md"].endswith(".md")
+
+    # All three formats should be served and carry the expected MIME type.
+    docx_resp = client.get(draft["downloadEndpoints"]["docx"], headers=auth_headers)
+    pdf_resp = client.get(draft["downloadEndpoints"]["pdf"], headers=auth_headers)
+    md_resp = client.get(draft["downloadEndpoints"]["md"], headers=auth_headers)
+    assert docx_resp.status_code == 200
+    assert pdf_resp.status_code == 200
+    assert md_resp.status_code == 200
+    assert pdf_resp.content.startswith(b"%PDF-")
+    assert b"PK" == docx_resp.content[:2]  # DOCX is a ZIP container
+    assert "QiShield Nova" in md_resp.text
 
     assets = client.get("/assets", headers=auth_headers)
     reminders = client.get("/reminders", headers=auth_headers)
@@ -82,6 +94,34 @@ def test_trademark_check_and_application_flow(client, auth_headers):
     assert reminders.status_code == 200
     assert len(assets.json()) == 1
     assert len(reminders.json()) == 4
+
+
+def test_compliance_report_multi_format_downloads(client, auth_headers):
+    """/compliance/profile/{id}/report.{ext} should serve md/docx/pdf alike."""
+    audit = client.post(
+        "/compliance/audit",
+        headers=auth_headers,
+        json={"companyName": "Galaxy Lab", "industry": "SaaS", "scale": "small"},
+    )
+    assert audit.status_code == 200, audit.text
+    profile_id = audit.json()["profile_id"]
+
+    md_resp = client.get(f"/compliance/profile/{profile_id}/report.md", headers=auth_headers)
+    docx_resp = client.get(f"/compliance/profile/{profile_id}/report.docx", headers=auth_headers)
+    pdf_resp = client.get(f"/compliance/profile/{profile_id}/report.pdf", headers=auth_headers)
+
+    assert md_resp.status_code == 200
+    assert "markdown" in md_resp.headers["content-type"]
+    assert "合规体检报告" in md_resp.text or "Galaxy Lab" in md_resp.text
+
+    assert docx_resp.status_code == 200
+    assert docx_resp.content[:2] == b"PK"
+
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.content.startswith(b"%PDF-")
+
+    bad = client.get(f"/compliance/profile/{profile_id}/report.html", headers=auth_headers)
+    assert bad.status_code == 400
 
 
 def test_placeholder_modules_are_exposed(client, auth_headers):

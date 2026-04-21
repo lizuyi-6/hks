@@ -17,8 +17,9 @@ import httpx
 # longer safely retry (tokens would be duplicated on resume), so mid-stream
 # errors still bubble up unchanged.
 _ARK_RETRY_STATUS_CODES = (429, 502, 503, 504)
-_ARK_MAX_RETRIES = 5
+_ARK_MAX_RETRIES = 8
 _ARK_BACKOFF_BASE_S = 0.8
+_ARK_RETRY_AFTER_CAP_S = 45.0
 
 # Exceptions that are safe to retry BEFORE the stream has emitted any token.
 # Retrying after the first byte would duplicate tokens, so callers must gate
@@ -80,6 +81,22 @@ from apps.api.app.schemas.trademark import ApplicationDraftRequest
 logger = logging.getLogger(__name__)
 
 
+def _friendly_llm_error(exc: BaseException, default_prefix: str) -> str:
+    """Translate Ark/LLM exceptions into user-facing Chinese messages.
+
+    In particular, a 429 after all retries means Doubao's RPM window is
+    saturated — surface a plain-language hint instead of the raw English
+    httpx error so end users understand it's a transient rate limit.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "AI 服务当前请求过多（Doubao 限流），请 30 秒后再试。"
+        if status in (502, 503, 504):
+            return "AI 服务暂时不可用，请稍后重试。"
+    return f"{default_prefix}：{exc}"
+
+
 def _parse_retry_after(header_value: str | None) -> float | None:
     """Parse the Retry-After header. Ark returns a number of seconds."""
     if not header_value:
@@ -94,8 +111,9 @@ def _compute_retry_delay(attempt: int, retry_after: float | None) -> float:
     """Use the server's Retry-After hint when present, otherwise exponential backoff+jitter."""
     if retry_after is not None:
         # Cap Retry-After so we don't block a user request for minutes;
-        # but also honor values up to 20s which is typical for Ark RPM windows.
-        return min(20.0, max(retry_after, _ARK_BACKOFF_BASE_S))
+        # honor values up to 45s so stubborn RPM windows can actually clear
+        # before we surface a user-facing error.
+        return min(_ARK_RETRY_AFTER_CAP_S, max(retry_after, _ARK_BACKOFF_BASE_S))
     return _ARK_BACKOFF_BASE_S * (2 ** attempt) + random.uniform(0, 0.4)
 
 
@@ -686,7 +704,7 @@ class RealLlmAdapter(LLMPort):
                 _body_preview,
             )
             raise APISystemError(
-                message=f"AI 诊断服务调用失败：{exc}",
+                message=_friendly_llm_error(exc, "AI 诊断服务调用失败"),
                 error_location="llm.diagnose",
             ) from exc
 
@@ -729,7 +747,7 @@ class RealLlmAdapter(LLMPort):
         except Exception as exc:
             logger.exception("LLM summarize failed: %s", exc)
             raise APISystemError(
-                message=f"AI 申请书摘要服务调用失败：{exc}",
+                message=_friendly_llm_error(exc, "AI 申请书摘要服务调用失败"),
                 error_location="llm.summarize_application",
             ) from exc
 
@@ -756,7 +774,7 @@ class RealLlmAdapter(LLMPort):
         except Exception as exc:
             logger.exception("LLM analyze_text failed: %s", exc)
             raise APISystemError(
-                message=f"AI 文本分析服务调用失败：{exc}",
+                message=_friendly_llm_error(exc, "AI 文本分析服务调用失败"),
                 error_location="llm.analyze_text",
             ) from exc
 
@@ -827,7 +845,7 @@ class RealLlmAdapter(LLMPort):
             yield sse_event(
                 "error",
                 {
-                    "message": f"AI 诊断服务调用失败：{exc}",
+                    "message": _friendly_llm_error(exc, "AI 诊断服务调用失败"),
                     "errorLocation": "llm.diagnose_stream",
                     "traceId": trace_id,
                 },
@@ -881,7 +899,7 @@ class RealLlmAdapter(LLMPort):
             yield sse_event(
                 "error",
                 {
-                    "message": f"AI 申请书摘要服务调用失败：{exc}",
+                    "message": _friendly_llm_error(exc, "AI 申请书摘要服务调用失败"),
                     "errorLocation": "llm.summarize_application_stream",
                     "traceId": trace_id,
                 },
@@ -918,7 +936,7 @@ class RealLlmAdapter(LLMPort):
             yield sse_event(
                 "error",
                 {
-                    "message": f"AI 文本分析服务调用失败：{exc}",
+                    "message": _friendly_llm_error(exc, "AI 文本分析服务调用失败"),
                     "errorLocation": "llm.analyze_text_stream",
                     "traceId": trace_id,
                 },
@@ -963,7 +981,7 @@ class RealLlmAdapter(LLMPort):
             # terminal event so they can forward it verbatim and stop.
             yield {
                 "type": "error",
-                "message": f"AI 多轮对话服务调用失败：{exc}",
+                "message": _friendly_llm_error(exc, "AI 多轮对话服务调用失败"),
                 "errorLocation": "llm.multi_turn_stream",
                 "traceId": trace_id,
             }

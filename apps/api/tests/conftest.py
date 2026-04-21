@@ -15,8 +15,17 @@ def reset_database():
     Base.metadata.create_all(bind=engine)
     generated_dir = Path(__file__).resolve().parents[1] / ".generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
+    # Wipe both files and subdirectories (compliance-reports/ etc.) so each
+    # test starts with a clean staging area.
+    import shutil
     for item in generated_dir.glob("*"):
-        item.unlink()
+        if item.is_dir():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            try:
+                item.unlink()
+            except OSError:
+                pass
     yield
 
 

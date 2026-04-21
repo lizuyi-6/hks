@@ -430,6 +430,23 @@ export function ApplicationWorkspace() {
                   </div>
                   <IconGlyph name="external" size={14} className="text-text-muted" />
                 </a>
+                {draft.downloadEndpoints.md ? (
+                  <a
+                    className="group flex items-center gap-3 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+                    href={`/api/backend${draft.downloadEndpoints.md}`}
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-text-secondary">
+                      <IconGlyph name="download" size={18} />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-text-primary">下载 Markdown</p>
+                      <p className="text-xs text-text-tertiary">
+                        源文件，Word / PDF 均基于此生成
+                      </p>
+                    </div>
+                    <IconGlyph name="external" size={14} className="text-text-muted" />
+                  </a>
+                ) : null}
               </div>
             </div>
 

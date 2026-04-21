@@ -27,6 +27,32 @@ from apps.api.app.services.event_bus import emit_event
 logger = logging.getLogger(__name__)
 
 
+class ComplianceQuotaExceeded(ValueError):
+    """Raised when the current subscription tier has no audit quota left.
+
+    Carries structured fields so the route layer can surface an actionable
+    402 to the frontend (upgrade CTA) instead of a generic red toast.
+    """
+
+    def __init__(
+        self,
+        *,
+        tier: str,
+        tier_label: str,
+        quota: int,
+        used: int,
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            message
+            or f"当前「{tier_label}」本月合规体检额度 {quota} 次已用完，已使用 {used} 次，升级后可继续体检。"
+        )
+        self.tier = tier
+        self.tier_label = tier_label
+        self.quota = quota
+        self.used = used
+
+
 SUBSCRIPTION_TIERS: dict[str, dict[str, Any]] = {
     "free": {
         "tier": "free",
@@ -80,8 +106,27 @@ def get_tier_config(tier: str) -> dict[str, Any]:
     return SUBSCRIPTION_TIERS.get(tier, SUBSCRIPTION_TIERS["free"])
 
 
+def _resolve_company_name(user: User, explicit: str | None) -> str:
+    # ``ComplianceProfile.company_name`` 列非空；新用户未填企业名 / 姓名时，
+    # 直接塞 None 会触发 IntegrityError，整个 POST /compliance/audit 以 500
+    # 爆掉，用户侧表现为"点了没反应"。这里做一层兜底，邮箱前缀也失败就给
+    # 一个明确占位，后续用户在 profile 页补齐后会覆盖。
+    candidates = [
+        explicit,
+        getattr(user, "business_name", None),
+        getattr(user, "full_name", None),
+    ]
+    email = getattr(user, "email", None)
+    if email:
+        candidates.append(email.split("@", 1)[0])
+    for c in candidates:
+        if c and str(c).strip():
+            return str(c).strip()
+    return "未命名企业"
+
+
 def _find_or_create_profile(
-    db: Session, user: User, company_name: str, industry: str | None, scale: str | None
+    db: Session, user: User, company_name: str | None, industry: str | None, scale: str | None
 ) -> ComplianceProfile:
     profile = (
         db.query(ComplianceProfile)
@@ -89,11 +134,12 @@ def _find_or_create_profile(
         .order_by(ComplianceProfile.created_at.desc())
         .first()
     )
+    resolved_name = _resolve_company_name(user, company_name)
     if profile is None:
         profile = ComplianceProfile(
             tenant_id=user.tenant_id,
             owner_user_id=user.id,
-            company_name=company_name or user.business_name or user.full_name,
+            company_name=resolved_name,
             industry=industry,
             scale=scale,
             subscription_tier="free",
@@ -101,7 +147,9 @@ def _find_or_create_profile(
         db.add(profile)
     else:
         if company_name:
-            profile.company_name = company_name
+            profile.company_name = resolved_name
+        elif not profile.company_name:
+            profile.company_name = resolved_name
         if industry:
             profile.industry = industry
         if scale:
@@ -129,9 +177,11 @@ def run_compliance_audit(
     if audit_quota != -1:
         usage = _month_usage(db, user, profile)
         if usage["auditsThisMonth"] >= audit_quota:
-            raise ValueError(
-                f"当前「{tier_cfg['label']}」本月合规体检额度 {audit_quota} 次已用完，"
-                f"已使用 {usage['auditsThisMonth']} 次，升级后可继续体检。"
+            raise ComplianceQuotaExceeded(
+                tier=profile.subscription_tier,
+                tier_label=tier_cfg["label"],
+                quota=audit_quota,
+                used=usage["auditsThisMonth"],
             )
 
     assets = db.query(IpAsset).filter(IpAsset.owner_id == user.id).all()

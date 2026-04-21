@@ -573,13 +573,15 @@ export function OnboardingWizard() {
             开始使用
           </SubmitButton>
         )}
-        <button
-          type="button"
-          onClick={() => router.push("/dashboard")}
-          className="text-sm text-text-tertiary hover:text-text-secondary"
-        >
-          跳过
-        </button>
+        {step === 1 && (
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="text-sm text-text-tertiary hover:text-text-secondary"
+          >
+            跳过
+          </button>
+        )}
       </div>
       {error && <p className="text-sm text-error-700">{error}</p>}
     </div>

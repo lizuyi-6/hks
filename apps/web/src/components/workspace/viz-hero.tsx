@@ -9,7 +9,7 @@ export function ColumnChart({
   data,
   labels,
   color = "currentColor",
-  trackColor = "rgba(0,0,0,0.05)",
+  trackColor = "rgb(var(--color-border) / 0.5)",
   width = 560,
   height = 160,
   barGap = 6,
@@ -84,7 +84,7 @@ export function ColumnChart({
                 y={height - 6}
                 textAnchor="middle"
                 fontSize={9}
-                fill="rgba(0,0,0,0.5)"
+                fill="rgb(var(--color-text-tertiary))"
                 fontFamily="inherit"
               >
                 {labels[i]}
@@ -120,7 +120,7 @@ export function StackedBar100({
           height,
           borderRadius: 999,
           overflow: "hidden",
-          background: "rgba(0,0,0,0.05)",
+          background: "rgb(var(--color-border) / 0.5)",
         }}
       >
         {segments.map((seg) => {
@@ -169,11 +169,11 @@ export function StackedBar100({
                     display: "inline-block",
                   }}
                 />
-                <span style={{ color: "rgba(0,0,0,0.75)" }}>{seg.label}</span>
-                <span style={{ color: "rgba(0,0,0,0.45)", fontFeatureSettings: '"tnum"' }}>
+                <span style={{ color: "rgb(var(--color-text-secondary))" }}>{seg.label}</span>
+                <span style={{ color: "rgb(var(--color-text-tertiary))", fontFeatureSettings: '"tnum"' }}>
                   {seg.value}
                 </span>
-                <span style={{ color: "rgba(0,0,0,0.35)", fontFeatureSettings: '"tnum"' }}>
+                <span style={{ color: "rgb(var(--color-text-muted))", fontFeatureSettings: '"tnum"' }}>
                   {percent.toFixed(0)}%
                 </span>
               </div>
@@ -194,8 +194,8 @@ export function StackedAreaChart({
   width = 720,
   height = 180,
   showGrid = true,
-  gridColor = "rgba(0,0,0,0.06)",
-  labelColor = "rgba(0,0,0,0.45)",
+  gridColor = "rgb(var(--color-border) / 0.6)",
+  labelColor = "rgb(var(--color-text-tertiary))",
 }: {
   series: Array<{ label: string; color: string; data: number[] }>;
   labels?: string[];
@@ -331,9 +331,9 @@ export function RadarChart({
   color = "currentColor",
   size = 260,
   rings = 4,
-  gridColor = "rgba(0,0,0,0.1)",
-  axisColor = "rgba(0,0,0,0.15)",
-  labelColor = "rgba(0,0,0,0.6)",
+  gridColor = "rgb(var(--color-text-tertiary) / 0.35)",
+  axisColor = "rgb(var(--color-text-tertiary) / 0.55)",
+  labelColor = "rgb(var(--color-text-primary))",
 }: {
   axes: string[];
   values: number[];
@@ -348,7 +348,7 @@ export function RadarChart({
   const uid = useId();
   const cx = size / 2;
   const cy = size / 2;
-  const radius = size / 2 - 36;
+  const radius = size / 2 - 52;
   const n = axes.length;
 
   const angle = (i: number) => (-Math.PI / 2) + (i * 2 * Math.PI) / n;
@@ -420,13 +420,13 @@ export function RadarChart({
             cy={y}
             r={3}
             fill={color}
-            stroke="white"
+            stroke="rgb(var(--color-surface))"
             strokeWidth={1.5}
           />
         );
       })}
       {axes.map((label, i) => {
-        const [x, y] = axisPoint(i, radius + 16);
+        const [x, y] = axisPoint(i, radius + 18);
         const a = angle(i);
         const anchor =
           Math.abs(Math.cos(a)) < 0.3 ? "middle" : Math.cos(a) > 0 ? "start" : "end";
@@ -676,7 +676,7 @@ export function SegmentedRings({
   items,
   size = 72,
   strokeWidth = 7,
-  track = "rgba(0,0,0,0.08)",
+  track = "rgb(var(--color-border) / 0.6)",
 }: {
   items: Array<{
     label: string;
@@ -912,7 +912,7 @@ export function RadialProgress({
   size = 160,
   strokeWidth = 10,
   color = "currentColor",
-  track = "rgba(0,0,0,0.08)",
+  track = "rgb(var(--color-border) / 0.6)",
   gap = 6, // degrees
   children,
 }: {
@@ -1006,7 +1006,7 @@ export function RibbonBar({
           height,
           borderRadius: 6,
           overflow: "hidden",
-          boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.06)",
+          boxShadow: "inset 0 0 0 1px rgb(var(--color-border))",
         }}
       >
         {segments.map((seg, i) => {
@@ -1040,7 +1040,7 @@ export function RibbonBar({
             width: "100%",
             marginTop: 6,
             fontSize: 10,
-            color: "rgba(0,0,0,0.5)",
+            color: "rgb(var(--color-text-tertiary))",
           }}
         >
           {segments.map((seg, i) => {
@@ -1075,7 +1075,7 @@ export function RadialBar({
   size = 220,
   strokeWidth = 12,
   gap = 4,
-  track = "rgba(0,0,0,0.06)",
+  track = "rgb(var(--color-border) / 0.6)",
   max,
 }: {
   items: Array<{ label: string; value: number; color: string }>;
@@ -1191,7 +1191,7 @@ export function GaugeArc({
   size = 260,
   strokeWidth = 16,
   color = "currentColor",
-  track = "rgba(0,0,0,0.08)",
+  track = "rgb(var(--color-border) / 0.6)",
   thresholds,
   valueLabel,
   caption,
@@ -1305,7 +1305,7 @@ export function GaugeArc({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke="rgba(0,0,0,0.35)"
+              stroke="rgb(var(--color-text-tertiary) / 0.55)"
               strokeWidth={1}
             />
           );
@@ -1385,7 +1385,7 @@ export function HeatGrid({
                 key={i}
                 style={{
                   fontSize: 9,
-                  color: "rgba(0,0,0,0.5)",
+                  color: "rgb(var(--color-text-tertiary))",
                   textAlign: "center",
                   gridColumn: `${i + 2} / span 1`,
                 }}
@@ -1411,7 +1411,7 @@ export function HeatGrid({
           <span
             style={{
               fontSize: 10,
-              color: "rgba(0,0,0,0.55)",
+              color: "rgb(var(--color-text-secondary))",
               display: "flex",
               alignItems: "center",
             }}
@@ -1476,7 +1476,7 @@ export function BalanceScale({
       {/* base */}
       <path
         d={`M ${cx - 60} ${height - 6} L ${cx + 60} ${height - 6} L ${cx + 30} ${pivotY + 10} L ${cx - 30} ${pivotY + 10} Z`}
-        fill="rgba(0,0,0,0.08)"
+        fill="rgb(var(--color-border) / 0.8)"
       />
       {/* beam pivot */}
       <circle cx={cx} cy={pivotY} r={8} fill="rgb(var(--color-text-primary))" />

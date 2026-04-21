@@ -1,0 +1,92 @@
+# Dev overlay for docker-compose.yml.
+#
+# Auto-merged by ``docker compose up`` so host edits to apps/web (tsx/css),
+# apps/api (py), and apps/worker (py) hot-reload inside the running
+# containers without rebuilding the image.
+#
+# To run in pure production mode (skip this overlay):
+#   docker compose -f docker-compose.yml up -d --build
+#
+# Windows note: bind mounts from NTFS do not emit inotify events to the
+# Linux container, so we force polling on every watcher (WATCHFILES /
+# WATCHPACK / CHOKIDAR). Polling is slightly heavier on CPU but is the only
+# reliable option on Windows/macOS bind mounts.
+
+services:
+  api:
+    command:
+      - uvicorn
+      - apps.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /workspace/apps
+      - --reload-dir
+      - /workspace/packages
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      # Bind-mount the whole repo over the image's baked-in /workspace so
+      # every host edit is visible inside the container in real time.
+      - .:/workspace
+      # Named volume keeps pytest cache + compiled bytecode out of the host
+      # tree so Windows doesn't fight Linux over file ownership.
+      - api_pycache:/workspace/.pytest_cache
+    # Publish FastAPI directly on the host in dev so you can curl it at
+    # http://localhost:8000 without going through the Next.js BFF.
+    ports:
+      - "8000:8000"
+
+  worker:
+    # ``watchfiles`` ships with uvicorn's reload machinery; reusing its CLI
+    # gives the worker an equivalent restart-on-change loop that only
+    # watches *.py via the --filter flag.
+    command:
+      - watchfiles
+      - --filter
+      - python
+      - python -m apps.worker.main
+      - /workspace/apps
+      - /workspace/packages
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - .:/workspace
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web.dev
+    # ``npm run dev:web -- --hostname 0.0.0.0`` doesn't survive npm's nested
+    # workspace script forwarding (the ``--`` is eaten by the outer
+    # ``npm run dev --workspace ...`` invocation), so call ``next`` from the
+    # web workspace directly. The ``node_modules/.bin/next`` binary is
+    # supplied by the anonymous volume on /workspace/apps/web/node_modules.
+    working_dir: /workspace/apps/web
+    command: ["npx", "next", "dev", "--hostname", "0.0.0.0"]
+    environment:
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      NEXT_PRIVATE_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_MODE: real
+    volumes:
+      - .:/workspace
+      # Anonymous volumes shadow the host's (possibly empty or Windows-
+      # built) node_modules and .next directories with the Linux artifacts
+      # installed inside the image. Without these, the bind mount above
+      # would hide the container's node_modules and Next.js would refuse
+      # to start.
+      - /workspace/node_modules
+      - /workspace/apps/web/node_modules
+      - /workspace/apps/web/.next
+      - /workspace/packages/domain/node_modules
+      - /workspace/packages/config/node_modules
+      - /workspace/packages/ui/node_modules
+
+volumes:
+  api_pycache:
