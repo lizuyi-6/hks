@@ -1,0 +1,19 @@
+[run]
+branch = False
+source =
+    apps/api/app/services
+    apps/api/app/adapters/real
+omit =
+    */__pycache__/*
+    */tests/*
+    apps/api/app/services/__init__.py
+    apps/api/app/adapters/real/__init__.py
+
+[report]
+skip_empty = True
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    logger\.debug
